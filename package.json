@@ -1,7 +1,7 @@
 {
-  "name": "clitool",
+  "name": "forge-cli",
   "version": "1.0.0",
-  "description": "",
+  "description": "Forge CLI is a command-line interface for scaffolding and managing AI-powered projects.",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
