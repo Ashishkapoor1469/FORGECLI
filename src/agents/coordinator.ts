@@ -23,7 +23,7 @@ export class Coordinator {
     spinner.message('[PLANNER] Generating task graph...');
     const memorySummary = this.memory.getMemorySummary();
     const graph = await this.planner.createPlan(request, config, memorySummary);
-    
+
     spinner.stop('Task Graph generated.');
 
     if (graph.projectName) {
@@ -39,7 +39,7 @@ export class Coordinator {
         prompt.log.info(`  ${chalk.bold(task.id)}: ${task.description}${file}${deps}`);
       }
     }
-    
+
     const confirm = await prompt.confirm({
       message: `Execute ${graph.tasks.length} tasks?`,
       initialValue: true
@@ -65,31 +65,31 @@ export class Coordinator {
     let waveCount = 1;
     for (const wave of schedule.waves) {
       prompt.log.info(`${chalk.bold(`[WAVE ${waveCount}/${schedule.waves.length}]`)} Executing ${wave.tasks.length} task(s) in parallel...`);
-      
+
       // Run LLM calls in parallel
       const executionPromises = wave.tasks.map(async task => {
         const tDef = graph.tasks.find(t => t.id === task.task_id);
         const desc = tDef ? tDef.description : 'Execute ' + task.task_id;
-        
+
         let logMsg = desc.substring(0, 50);
         if (tDef && tDef.fileOutput) {
           logMsg = `[WRITE] ${tDef.fileOutput}`;
         }
-        
+
         rightAlignedLog(logMsg, `[${task.agent}]`);
-        
+
         const context: Record<string, any> = {};
         if (tDef && tDef.dependencies) {
-           for (const dep of tDef.dependencies) {
-               context[dep] = state.taskRegistry[dep]?.result || 'No output.';
-           }
+          for (const dep of tDef.dependencies) {
+            context[dep] = state.taskRegistry[dep]?.result || 'No output.';
+          }
         }
 
-        return this.worker.execute(task, desc, context, config, graph.projectName, tDef?.fileOutput, directoryManifest);
+        return this.worker.execute(task, desc, context, config, graph.projectName, tDef?.fileOutput, directoryManifest, request);
       });
-      
+
       const results = await Promise.all(executionPromises);
-      
+
       // Process results
       for (const result of results) {
         state.taskRegistry[result.task_id] = {
