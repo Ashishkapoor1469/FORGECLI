@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, writeFileSync, existsSync } from "fs";
+import { join } from "path";
 
 export interface GachaState {
   lastBoxOpened: number; // timestamp
@@ -8,35 +8,57 @@ export interface GachaState {
 }
 
 export const ANIME_ROSTER = [
-  "Naruto Uzumaki", "Sasuke Uchiha", "Kakashi Hatake",
-  "Goku", "Vegeta", "Gohan",
-  "Saitama", "Genos", 
-  "Eren Yeager", "Levi Ackerman", "Mikasa Ackerman",
-  "Satoru Gojo", "Yuji Itadori", "Megumi Fushiguro",
-  "Monkey D. Luffy", "Roronoa Zoro", "Sanji",
-  "Gon Freecss", "Killua Zoldyck", "Hisoka",
-  "Tanjiro Kamado", "Nezuko Kamado", "Zenitsu Agatsuma",
-  "Light Yagami", "L Lawliet",
-  "Izuku Midoriya", "Katsuki Bakugo", "Shoto Todoroki"
+  "Naruto Uzumaki",
+  "Sasuke Uchiha",
+  "Kakashi Hatake",
+  "Goku",
+  "Vegeta",
+  "Gohan",
+  "Saitama",
+  "Genos",
+  "Eren Yeager",
+  "Levi Ackerman",
+  "Mikasa Ackerman",
+  "Satoru Gojo",
+  "Yuji Itadori",
+  "Megumi Fushiguro",
+  "Monkey D. Luffy",
+  "Roronoa Zoro",
+  "Sanji",
+  "Gon Freecss",
+  "Killua Zoldyck",
+  "Hisoka",
+  "Tanjiro Kamado",
+  "Nezuko Kamado",
+  "Zenitsu Agatsuma",
+  "Light Yagami",
+  "L Lawliet",
+  "Izuku Midoriya",
+  "Katsuki Bakugo",
+  "Shoto Todoroki",
 ];
 
 export class GachaManager {
   private filePath: string;
 
-  constructor(filePath = 'gacha.json') {
+  constructor(filePath = "gacha.json") {
     this.filePath = join(process.cwd(), filePath);
     this.initFile();
   }
 
   private initFile() {
     if (!existsSync(this.filePath)) {
-      this.saveState({ lastBoxOpened: 0, unlockedCharacters: [], activeBuddy: null });
+      this.saveState({
+        lastBoxOpened: 0,
+        unlockedCharacters: [],
+        activeBuddy: null,
+      });
     }
   }
 
   private getState(): GachaState {
     try {
-      const data = readFileSync(this.filePath, 'utf-8');
+      const data = readFileSync(this.filePath, "utf-8");
       return JSON.parse(data);
     } catch {
       return { lastBoxOpened: 0, unlockedCharacters: [], activeBuddy: null };
@@ -44,7 +66,7 @@ export class GachaManager {
   }
 
   private saveState(state: GachaState) {
-    writeFileSync(this.filePath, JSON.stringify(state, null, 2), 'utf-8');
+    writeFileSync(this.filePath, JSON.stringify(state, null, 2), "utf-8");
   }
 
   getCollection(): string[] {
@@ -74,16 +96,21 @@ export class GachaManager {
       const remainingMs = hours24 - (now - state.lastBoxOpened);
       const hours = Math.floor(remainingMs / (1000 * 60 * 60));
       const mins = Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60));
-      return { 
-        success: false, 
-        message: `You must wait ${hours}h ${mins}m before opening another box!` 
+      return {
+        success: false,
+        message: `You must wait ${hours}h ${mins}m before opening another box!`,
       };
     }
 
     // Determine lockouts
-    const possible = ANIME_ROSTER.filter(c => !state.unlockedCharacters.includes(c));
+    const possible = ANIME_ROSTER.filter(
+      (c) => !state.unlockedCharacters.includes(c),
+    );
     if (possible.length === 0) {
-      return { success: false, message: "You have already unlocked every character in the game!" };
+      return {
+        success: false,
+        message: "You have already unlocked every character in the game!",
+      };
     }
 
     // Roll
@@ -95,10 +122,10 @@ export class GachaManager {
     state.lastBoxOpened = now;
     this.saveState(state);
 
-    return { 
-      success: true, 
-      character: wonCharacter, 
-      message: `You unlocked: ${wonCharacter}!` 
+    return {
+      success: true,
+      character: wonCharacter,
+      message: `You unlocked: ${wonCharacter}!`,
     };
   }
 }

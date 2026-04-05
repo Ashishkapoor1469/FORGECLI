@@ -22,6 +22,7 @@
 - [How It Works](#how-it-works)
   - [Intent Routing](#intent-routing)
   - [The Build Pipeline](#the-build-pipeline)
+  - [Command Detection](#command-detection)
   - [Chat Mode](#chat-mode)
 - [Providers & Models](#providers--models)
   - [Ollama (Local)](#ollama-local)
@@ -44,13 +45,15 @@
 | 🧠 **Multi-Agent Orchestration** | Planner, Task Manager, Worker agents coordinate automatically |
 | 🔀 **Intent Router** | Detects if you want to chat or build — no manual mode switching |
 | ⚡ **Parallel Wave Execution** | Tasks are grouped and executed concurrently where possible |
+| 🛡️ **Command Detection** | Shell commands are detected and shown to the user — never written to files |
 | 💬 **Streaming Chat** | Token-by-token streaming exactly like Claude's UI |
-| 🗂️ **Persistent Memory** | All sessions are logged to `memory.json` so the AI remembers your past work |
+| 🗂️ **Persistent Memory** | All sessions are logged to `memory.json` with automatic trimming |
 | 🔌 **Dual Provider Support** | Works with local Ollama models OR cloud OpenRouter models exclusively |
 | 📁 **Real File Generation** | Creates actual folders and source files in your `workspace/` directory |
+| 🚀 **Project Scaffolding** | `/create` command for React (Bun), Vite, Next.js, and Express |
 | 🎮 **Anime Gacha System** | Daily loot boxes to unlock Anime character companions |
 | 🦊 **Dynamic Buddy Personas** | Your buddy companion alters the LLM's chat personality |
-| 🎨 **Dynamic ASCII Mascots** | Snowman, Panda, Dog, Eagle, or Lizard greets you randomly each boot |
+| 🎨 **Dynamic ASCII Mascots** | Random mascot greets you each boot |
 | 🌐 **Model Support** | Works with any Ollama-installed model and any OpenRouter model ID |
 
 ---
@@ -68,7 +71,7 @@ User Input
     ▼
 ┌─────────────────────┐
 │      PLANNER        │  ── Generates a TaskGraph (JSON) with dependencies
-└─────────────────────┘
+└─────────────────────┘     (never generates command tasks — only file tasks)
     │
     ▼
 ┌─────────────────────┐
@@ -78,21 +81,22 @@ User Input
     ▼
 ┌─────────────────────────────────────┐
 │  WAVE EXECUTOR (Coordinator)        │
-│  Wave 1: [Task A] [Task B]  ──────► │  Concurrent
+│  Wave 1: [Task A] [Task B]  ──────► │  Concurrent LLM calls
 │  Wave 2: [Task C]           ──────► │  Sequential per wave
 └─────────────────────────────────────┘
     │
     ▼
 ┌──────────────────────────────┐
 │   WORKER AGENTS              │
+│   - Detect code vs commands  │
 │   - Write code to files      │
-│   - Use fs to create dirs    │
+│   - Show commands to user    │
 │   - Save to workspace/       │
 └──────────────────────────────┘
     │
     ▼
 ┌─────────────────────┐
-│   MEMORY MANAGER    │  ── Logs full session for future context
+│   MEMORY MANAGER    │  ── Logs full session (auto-trimmed at 100 entries)
 └─────────────────────┘
 ```
 
@@ -103,15 +107,16 @@ User Input
 ### Prerequisites
 
 - **Node.js** v18+
-- **npm** or **yarn**
+- **npm** or **Bun**
 - **Ollama** (for local execution) — [Install here](https://ollama.com/)
 - **OpenRouter API Key** (optional, for cloud execution)
+- **Bun** (optional, for `/create` React scaffolding) — [Install here](https://bun.sh/)
 
 ### Installation
 
 ```bash
-# Clone or navigate to the clitool directory
-cd clitool
+# Clone or navigate to the project directory
+cd FORGECLI
 
 # Install dependencies
 npm install
@@ -136,9 +141,13 @@ You can type these commands at any prompt inside Forge:
 
 | Command | Action |
 |---|---|
+| `/help` | **Show all available commands** with descriptions |
 | `/model` | Switch LLM provider (Ollama / OpenRouter) and select a model |
+| `/create` | **Scaffold a new project** — React (Bun), Vite, Next.js, or Express |
 | `/anime` | Open the daily loot box or view your character collection |
 | `/buddy` | Set an active Anime character as your chat companion |
+| `/clear` | Clear the terminal screen |
+| `/memory` | Show memory stats (entries count, build/chat breakdown) |
 
 ### Natural Language
 Any other input is automatically analyzed by the **Intent Router**:
@@ -159,7 +168,7 @@ Every prompt is first passed to the **IntentRouter** (`src/agents/router.ts`). I
 
 - If `"chat"` → streams directly
 - If `"build"` → hands off to the Coordinator pipeline
-- On LLM error → defaults to `"build"` as a safe fallback
+- On LLM error → defaults to `"chat"` as a safe fallback
 
 ### The Build Pipeline
 
@@ -167,25 +176,45 @@ Every prompt is first passed to the **IntentRouter** (`src/agents/router.ts`). I
 
 ```json
 {
-  "projectName": "CalculatorApp",
+  "projectName": "express-api-server",
   "tasks": [
-    { "id": "task-1", "description": "Create HTML shell", "fileOutput": "src/index.html", "dependencies": [] },
-    { "id": "task-2", "description": "Write CSS styles", "fileOutput": "src/styles.css", "dependencies": [] },
-    { "id": "task-3", "description": "Script logic", "fileOutput": "src/scripts.js", "dependencies": ["task-1"] }
+    { "id": "task-1", "description": "Create package.json with Express dependency", "fileOutput": "package.json", "dependencies": [] },
+    { "id": "task-2", "description": "Create main server entry point", "fileOutput": "src/index.js", "dependencies": ["task-1"] },
+    { "id": "task-3", "description": "Write CSS styles", "fileOutput": "src/styles.css", "dependencies": [] }
   ]
 }
 ```
 
+> **Important**: The planner is instructed to NEVER generate shell command tasks. Every task must produce a real source file.
+
 **Step 2 — Scheduling**: The Task Manager (`src/agents/taskManager.ts`) topologically sorts tasks into parallel waves:
 ```
-Wave 1: task-1, task-2   (no dependencies)
-Wave 2: task-3           (depends on task-1 output)
+Wave 1: task-1, task-3   (no dependencies → run in parallel)
+Wave 2: task-2           (depends on task-1 output)
 ```
 
 **Step 3 — Execution**: Workers execute all tasks in a wave concurrently. Each worker:
 - Receives the task description + outputs of dependency tasks for context
 - Receives the full **directory manifest** (all files being created) so HTML workers correctly link CSS/JS via relative paths
 - Physically writes the generated code to `workspace/[projectName]/[fileOutput]`
+
+### Command Detection
+
+Workers include a **command detection system** that prevents shell commands from being written to files:
+
+- If the LLM generates output that looks like shell commands (e.g., `npm install express`, `mkdir src`), the worker detects this and marks the output as a **command** instead of code.
+- Commands are **collected and displayed** to the user at the end of the build:
+
+```
+📋 Commands to run manually:
+┌─────────────────────────────────────────
+│  $ npm install express body-parser cors
+│  $ npm run dev
+└─────────────────────────────────────────
+Copy and run these commands in your project directory.
+```
+
+- This ensures generated files always contain valid source code, not shell commands.
 
 ### Chat Mode
 
@@ -256,18 +285,24 @@ Type `/model` at any time during your session:
 
 ## Memory System
 
-Every interaction is persisted to `clitool/memory.json`:
+Every interaction is persisted to `memory.json`:
 
 ```json
 [
   {
     "timestamp": "2026-04-04T05:00:00Z",
     "request": "Build an express server",
-    "graph": { "projectName": "ExpressServer", "tasks": [...] },
+    "graph": { "projectName": "express-api-server", "tasks": [...] },
     "results": { "task-1": { "status": "completed", "result": "..." } }
   }
 ]
 ```
+
+**Memory management features:**
+- Auto-trimmed at **100 entries** to prevent unbounded growth
+- Only the **last 10 entries** are injected into LLM context prompts
+- Build and chat entries are tracked separately
+- Use `/memory` to see stats
 
 The memory is injected into the **Planner's** system prompt, so it naturally builds on prior context:
 > "In our previous session, you built an Express server. Now extending it with auth..."
@@ -319,17 +354,17 @@ State is persisted in `gacha.json` across sessions.
 All generated projects are saved inside the `workspace/` directory:
 
 ```
-clitool/
+FORGECLI/
 └── workspace/
-    ├── CalculatorApp/
+    ├── express-api-server/
+    │   ├── package.json
     │   └── src/
-    │       ├── index.html
-    │       ├── styles.css
-    │       └── scripts.js
-    └── AshishPortfolio/
+    │       └── index.js
+    └── react-todo-app/
         ├── index.html
-        └── css/
-            └── style.css
+        └── src/
+            ├── styles.css
+            └── app.js
 ```
 
 The AI is explicitly instructed to use relative paths when linking files:
@@ -343,7 +378,7 @@ The AI is explicitly instructed to use relative paths when linking files:
 ## Project Structure
 
 ```
-clitool/
+FORGECLI/
 ├── src/
 │   ├── index.ts              # CLI entry point & REPL loop
 │   ├── types.ts              # TypeScript interfaces
@@ -351,7 +386,7 @@ clitool/
 │   │   ├── coordinator.ts    # Orchestrates the full pipeline
 │   │   ├── planner.ts        # Decomposes requests into TaskGraph
 │   │   ├── taskManager.ts    # Topological sort → wave scheduling
-│   │   ├── worker.ts         # Executes tasks, writes files
+│   │   ├── worker.ts         # Executes tasks, detects commands, writes files
 │   │   └── router.ts         # Intent detection + chat streaming
 │   ├── llm/
 │   │   ├── ollama.ts         # Ollama client (local models)
@@ -361,7 +396,7 @@ clitool/
 │       ├── memory.ts         # Persistent session memory (memory.json)
 │       └── gacha.ts          # Anime loot box & buddy system
 ├── workspace/                # All generated projects land here
-├── memory.json               # Session history (auto-created)
+├── memory.json               # Session history (auto-created, auto-trimmed)
 ├── gacha.json                # Gacha progress (auto-created)
 ├── .env                      # API keys
 ├── package.json
@@ -408,9 +443,10 @@ npm start       # Run compiled output
 |---|---|
 | `fetch failed` on any prompt | Ensure `ollama serve` is running if using Ollama |
 | `Invalid API Key` | Check your `OPENROUTER_API_KEY` in `.env` |
-| Files written to wrong directory | Ensure you run `npm run dev` from the `clitool/` directory |
+| Files written to wrong directory | Ensure you run `npm run dev` from the `FORGECLI/` directory |
 | Intent always routes to BUILD | The 1.5b model sometimes fails — try a larger model via `/model` |
-| All projects named `MyProjectApp` | This is fixed — update to latest code and restart |
+| Commands written to files | Fixed — commands are now detected and shown, not written |
+| `/create` fails with Bun | Ensure Bun is installed: `curl -fsSL https://bun.sh/install \| bash` |
 
 ---
 

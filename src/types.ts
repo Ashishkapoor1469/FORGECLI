@@ -35,6 +35,7 @@ export interface WorkerOutput {
   agent: string;
   status: TaskStatus;
   result: string;
+  outputType: 'command' | 'code';
   artifacts: string[];
   errors: string[];
 }
