@@ -1,5 +1,6 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, chmodSync } from 'fs';
 import { join, dirname } from 'path';
+import { encrypt, decrypt } from './crypto.js';
 
 export interface MemoryEntry {
   timestamp: string;
@@ -12,7 +13,7 @@ export class MemoryManager {
   private filePath: string;
   private maxEntries: number;
 
-  constructor(filePath = '.forge/memory.json', maxEntries = 100) {
+  constructor(filePath = '.forge/memory.dat', maxEntries = 100) {
     this.filePath = join(process.cwd(), filePath);
     this.maxEntries = maxEntries;
     // Ensure the hidden .forge directory exists
@@ -25,10 +26,26 @@ export class MemoryManager {
       return [];
     }
     try {
-      const data = readFileSync(this.filePath, 'utf-8');
-      return JSON.parse(data);
+      const encrypted = readFileSync(this.filePath, 'utf-8');
+      if (!encrypted.trim()) return [];
+      const json = decrypt(encrypted);
+      return JSON.parse(json);
     } catch {
       return [];
+    }
+  }
+
+  /** Temporarily unlock file for writing (admin bypass) */
+  private unlock() {
+    if (existsSync(this.filePath)) {
+      chmodSync(this.filePath, 0o666);
+    }
+  }
+
+  /** Lock file back to read-only */
+  private lock() {
+    if (existsSync(this.filePath)) {
+      chmodSync(this.filePath, 0o444);
     }
   }
 
@@ -41,7 +58,10 @@ export class MemoryManager {
       memories = memories.slice(memories.length - this.maxEntries);
     }
 
-    writeFileSync(this.filePath, JSON.stringify(memories, null, 2), 'utf-8');
+    this.unlock();
+    const encrypted = encrypt(JSON.stringify(memories));
+    writeFileSync(this.filePath, encrypted, 'utf-8');
+    this.lock();
   }
 
   getMemorySummary(): string {

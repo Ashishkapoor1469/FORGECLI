@@ -1,5 +1,6 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from "fs";
 import { join, dirname } from "path";
+import { encrypt, decrypt } from "./crypto.js";
 
 export interface GachaState {
   lastBoxOpened: number; // timestamp
@@ -41,7 +42,7 @@ export const ANIME_ROSTER = [
 export class GachaManager {
   private filePath: string;
 
-  constructor(filePath = ".forge/gacha.json") {
+  constructor(filePath = ".forge/gacha.dat") {
     this.filePath = join(process.cwd(), filePath);
     // Ensure the hidden .forge directory exists
     const dir = dirname(this.filePath);
@@ -61,15 +62,36 @@ export class GachaManager {
 
   private getState(): GachaState {
     try {
-      const data = readFileSync(this.filePath, "utf-8");
-      return JSON.parse(data);
+      const encrypted = readFileSync(this.filePath, "utf-8");
+      if (!encrypted.trim()) {
+        return { lastBoxOpened: 0, unlockedCharacters: [], activeBuddy: null };
+      }
+      const json = decrypt(encrypted);
+      return JSON.parse(json);
     } catch {
       return { lastBoxOpened: 0, unlockedCharacters: [], activeBuddy: null };
     }
   }
 
+  /** Temporarily unlock file for writing (admin bypass) */
+  private unlock() {
+    if (existsSync(this.filePath)) {
+      chmodSync(this.filePath, 0o666);
+    }
+  }
+
+  /** Lock file back to read-only */
+  private lock() {
+    if (existsSync(this.filePath)) {
+      chmodSync(this.filePath, 0o444);
+    }
+  }
+
   private saveState(state: GachaState) {
-    writeFileSync(this.filePath, JSON.stringify(state, null, 2), "utf-8");
+    this.unlock();
+    const encrypted = encrypt(JSON.stringify(state));
+    writeFileSync(this.filePath, encrypted, "utf-8");
+    this.lock();
   }
 
   getCollection(): string[] {

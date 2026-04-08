@@ -1,72 +1,106 @@
-import OpenAI from 'openai';
-import dotenv from 'dotenv';
+import dotenv from "dotenv";
 dotenv.config();
 
 export class OpenRouterClient {
-  private client: OpenAI;
+  private apiKey: string;
 
   constructor() {
-    const apiKey = process.env.OPENROUTER_API_KEY || 'dummy_key';
-    this.client = new OpenAI({
-      baseURL: 'https://openrouter.ai/api/v1',
-      apiKey: apiKey,
-      defaultHeaders: {
-        "HTTP-Referer": "http://localhost:3000",
-        "X-Title": "FORGECLI",
-        "Authorization": `Bearer ${apiKey}`
-      }
-    });
+    const key = process.env.OPENROUTER_API_KEY?.trim();
+
+    console.log("API KEY:", key);
+
+    if (!key) {
+      throw new Error("❌ OPENROUTER_API_KEY missing");
+    }
+
+    this.apiKey = key;
   }
 
-  async generateJson(prompt: string, systemPrompt: string, model: string): Promise<any> {
-    const response = await this.client.chat.completions.create({
-      model: model, 
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: prompt }
-      ],
-      response_format: { type: 'json_object' }
+  private async request(body: any) {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
     });
 
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`❌ OpenRouter Error: ${res.status} - ${text}`);
+    }
+
+    return res.json();
+  }
+
+  // ⚡ Normal task
+  async executeTask(systemPrompt: string, prompt: string, model: string) {
+    const data = await this.request({
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: prompt }
+      ]
+    });
+
+    return data.choices?.[0]?.message?.content || "";
+  }
+
+  // 🧠 JSON task
+  async generateJson(systemPrompt: string, prompt: string, model: string) {
+    const content = await this.executeTask(
+      systemPrompt + "\nReturn ONLY JSON.",
+      prompt,
+      model
+    );
+
     try {
-      return JSON.parse(response.choices[0].message.content || '{}');
-    } catch (e) {
-      throw new Error("Failed to parse OpenRouter response as JSON.");
+      return JSON.parse(content);
+    } catch {
+      throw new Error("❌ JSON parse failed:\n" + content);
     }
   }
 
-  async executeTask(systemPrompt: string, prompt: string, model: string): Promise<string> {
-    const response = await this.client.chat.completions.create({
-      model: model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: prompt }
-      ]
+  // 🌊 Streaming
+  async *streamTask(systemPrompt: string, prompt: string, model: string) {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model,
+        stream: true,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: prompt }
+        ]
+      })
     });
-    return response.choices[0].message.content || 'Task result...';
-  }
 
-  async *streamTask(systemPrompt: string, prompt: string, model: string): AsyncGenerator<string, void, unknown> {
-    
-    // @ts-expect-error - OpenRouter include_reasoning is not in OpenAI strict types
-    const stream = await this.client.chat.completions.create({
-      model: model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: prompt }
-      ],
-      stream: true,
-      include_reasoning: true
-    });
-    
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta as any;
-      
-      if (delta?.reasoning) {
-        yield delta.reasoning;
-      }
-      if (delta?.content) {
-        yield delta.content;
+    if (!res.body) throw new Error("No stream body");
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value);
+      const lines = chunk.split("\n").filter(l => l.startsWith("data:"));
+
+      for (const line of lines) {
+        const json = line.replace("data:", "").trim();
+        if (json === "[DONE]") return;
+
+        try {
+          const parsed = JSON.parse(json);
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (delta) yield delta;
+        } catch {}
       }
     }
   }
