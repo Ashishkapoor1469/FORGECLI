@@ -1,8 +1,9 @@
 import { WorkerOutput, WaveTask, ProviderConfig } from "../types.js";
 import { OllamaClient } from "../llm/ollama.js";
 import { OpenRouterClient } from "../llm/openrouter.js";
-import { mkdirSync, writeFileSync } from "fs";
+import { mkdir, writeFile } from "fs/promises";
 import { join, dirname } from "path";
+import { globalFileQueue } from "../utils/fileQueue.js";
 
 // Patterns that indicate the LLM output is a shell command, not code
 const COMMAND_PATTERNS = [
@@ -53,6 +54,8 @@ export class WorkerAgent {
     projectName?: string,
     fileOutput?: string,
     directoryManifest?: string[],
+    attempt: number = 1,
+    maxRetries: number = 3
   ): Promise<WorkerOutput> {
     let pathingInstruction = "";
     if (directoryManifest && directoryManifest.length > 0) {
@@ -128,8 +131,17 @@ CRITICAL RULES:
           projectName,
           fileOutput,
         );
-        mkdirSync(dirname(fullPath), { recursive: true });
-        writeFileSync(fullPath, strippedResult, "utf-8");
+        const dirPath = dirname(fullPath);
+
+        // Safely lock directory creation, then lock file writing
+        await globalFileQueue.enqueue(dirPath, async () => {
+          await mkdir(dirPath, { recursive: true });
+        });
+
+        await globalFileQueue.enqueue(fullPath, async () => {
+          await writeFile(fullPath, strippedResult, "utf-8");
+        });
+
         artifacts.push(fullPath);
       }
 
@@ -143,6 +155,19 @@ CRITICAL RULES:
         errors: [],
       };
     } catch (e: any) {
+      if (attempt < maxRetries) {
+        return this.execute(
+          task,
+          taskDescription,
+          context,
+          config,
+          projectName,
+          fileOutput,
+          directoryManifest,
+          attempt + 1,
+          maxRetries
+        );
+      }
       return {
         task_id: task.task_id,
         agent: task.agent,

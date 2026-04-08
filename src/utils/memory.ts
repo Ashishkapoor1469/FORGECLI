@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, existsSync, statSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'fs';
+import { join, dirname } from 'path';
 
 export interface MemoryEntry {
   timestamp: string;
@@ -12,9 +12,12 @@ export class MemoryManager {
   private filePath: string;
   private maxEntries: number;
 
-  constructor(filePath = 'memory.json', maxEntries = 100) {
+  constructor(filePath = '.forge/memory.json', maxEntries = 100) {
     this.filePath = join(process.cwd(), filePath);
     this.maxEntries = maxEntries;
+    // Ensure the hidden .forge directory exists
+    const dir = dirname(this.filePath);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   }
 
   getMemories(): MemoryEntry[] {

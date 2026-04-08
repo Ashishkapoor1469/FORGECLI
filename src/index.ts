@@ -1,4 +1,5 @@
-import { showIntro, showOutro } from "./utils/ui.js";
+import { showIntro, showOutro, streamSideBySideChat, startGlobalMascot, stopGlobalMascot, getRandomMascotName } from "./utils/ui.js";
+import { autocompleteText } from "./utils/prompt.js";
 import * as prompt from "@clack/prompts";
 import { Coordinator } from "./agents/coordinator.js";
 import { ProviderConfig } from "./types.js";
@@ -8,7 +9,7 @@ import { GachaManager } from "./utils/gacha.js";
 import chalk from "chalk";
 import { execSync } from "child_process";
 import { join } from "path";
-import { mkdirSync, existsSync } from "fs";
+import { mkdirSync, existsSync, readFileSync, writeFileSync } from "fs";
 
 process.removeAllListeners("SIGINT");
 process.removeAllListeners("SIGTERM");
@@ -52,33 +53,70 @@ function showHelp() {
 }
 
 async function handleModelSelection() {
-  const provider = await prompt.select({
-    message: "Select LLM Provider",
-    options: [
-      { value: "ollama", label: "Ollama (Local)" },
-      { value: "openrouter", label: "OpenRouter (Cloud)" },
-    ],
-  });
-
-  if (prompt.isCancel(provider)) return;
-
-  let model;
-  if (provider === "ollama") {
-    model = await prompt.text({
-      message: "Enter Ollama model name",
-      initialValue: "qwen2.5-coder:1.5b",
-    });
-  } else {
-    model = await prompt.text({
-      message: "Enter OpenRouter model name",
-      initialValue: "openai/gpt-4o",
-    });
+  const savedModelsPath = join(process.cwd(), "workspace", "saved_models.json");
+  let savedModels: { provider: string, model: string }[] = [];
+  if (existsSync(savedModelsPath)) {
+    try {
+      savedModels = JSON.parse(readFileSync(savedModelsPath, "utf-8"));
+    } catch {}
   }
 
-  if (prompt.isCancel(model)) return;
+  const options: any[] = [];
+  
+  if (savedModels.length > 0) {
+    savedModels.forEach((m, i) => {
+       options.push({ value: `saved:${i}`, label: `💾 ${m.provider} (${m.model})` });
+    });
+  }
+  
+  options.push({ value: "ollama", label: "Ollama (New)" });
+  options.push({ value: "openrouter", label: "OpenRouter (New)" });
+
+  const selection = await prompt.select({
+    message: "Select LLM Provider",
+    options,
+  });
+
+  if (prompt.isCancel(selection)) return;
+
+  let provider = "";
+  let modelStr = "";
+
+  if (typeof selection === "string" && selection.startsWith("saved:")) {
+     const idx = parseInt(selection.split(":")[1]);
+     provider = savedModels[idx].provider;
+     modelStr = savedModels[idx].model;
+  } else {
+    provider = selection as string;
+    if (provider === "ollama") {
+      const resp = await prompt.text({
+        message: "Enter Ollama model name",
+        initialValue: "qwen2.5-coder:1.5b",
+      });
+      if (prompt.isCancel(resp)) return;
+      modelStr = resp as string;
+    } else {
+      const resp = await prompt.text({
+        message: "Enter OpenRouter model name",
+        initialValue: "openai/gpt-4o",
+      });
+      if (prompt.isCancel(resp)) return;
+      modelStr = resp as string;
+    }
+
+    // Save newly entered model
+    const exists = savedModels.some(s => s.provider === provider && s.model === modelStr);
+    if (!exists) {
+      savedModels.push({ provider, model: modelStr });
+      if (!existsSync(join(process.cwd(), "workspace"))) {
+         mkdirSync(join(process.cwd(), "workspace"));
+      }
+      writeFileSync(savedModelsPath, JSON.stringify(savedModels, null, 2), "utf-8");
+    }
+  }
 
   config.provider = provider as "ollama" | "openrouter";
-  config.model = model as string;
+  config.model = modelStr;
   prompt.log.success(`Switched to ${config.provider} (${config.model})`);
 }
 
@@ -317,9 +355,11 @@ async function handleBuddyMenu() {
 
   if (selection === "none") {
     gacha.setActiveBuddy(null);
+    stopGlobalMascot();
     prompt.log.success("Buddy deactivated.");
   } else {
     gacha.setActiveBuddy(selection as string);
+    startGlobalMascot(selection as string);
     prompt.log.success(
       `You are now chatting with ${chalk.magenta(selection)}!`,
     );
@@ -346,19 +386,21 @@ function showMemoryStats() {
 async function main() {
   showIntro();
 
-  const buddy = gacha.getActiveBuddy();
+  const buddy = gacha.getActiveBuddy() || getRandomMascotName();
+  startGlobalMascot(buddy);
   const buddyStr = buddy ? ` | Buddy: ${chalk.magenta(buddy)}` : "";
   prompt.log.info(
     `Model: ${chalk.cyan(`${config.provider}/${config.model}`)}${buddyStr} | Type ${chalk.bold("/help")} for commands`,
   );
 
   while (true) {
-    const userReq = await prompt.text({
+    const userReq = await autocompleteText({
       message: "forge ›",
       placeholder: "Ask anything or describe what to build... (/help)",
     });
 
     if (prompt.isCancel(userReq)) {
+      stopGlobalMascot();
       showOutro("Goodbye!");
       process.exit(0);
     }
@@ -413,32 +455,9 @@ async function main() {
       if (intent === "chat") {
         const memSum = memory.getMemorySummary();
         const chatStream = router.streamChat(input, memSum, config);
+        const buddy = gacha.getActiveBuddy();
 
-        const chatSpinner = prompt.spinner();
-        chatSpinner.start("Thinking...");
-
-        let fullResponse = "";
-        let isFirstChunk = true;
-
-        for await (const chunk of chatStream) {
-          if (isFirstChunk) {
-            chatSpinner.stop("Ready:");
-            console.log(`\n${chalk.dim("┌─────────────────────────────")}`);
-            process.stdout.write("│ ");
-            isFirstChunk = false;
-          }
-
-          const safeChunk = chunk.replace(/\n/g, "\n│ ");
-          process.stdout.write(safeChunk);
-          fullResponse += chunk;
-        }
-
-        if (isFirstChunk) {
-          chatSpinner.stop("Finished.");
-          console.log(`\n${chalk.dim("┌─────────────────────────────")}\n│ `);
-        }
-
-        console.log(`\n${chalk.dim("└─────────────────────────────")}\n`);
+        const fullResponse = await streamSideBySideChat(chatStream, buddy);
 
         // Save chat into memory
         memory.saveMemory({

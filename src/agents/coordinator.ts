@@ -1,11 +1,13 @@
 import { Planner } from './planner.js';
 import { TaskManager } from './taskManager.js';
 import { WorkerAgent } from './worker.js';
-import { GlobalState, ProviderConfig } from '../types.js';
+import { GlobalState, ProviderConfig, WaveTask, WorkerOutput } from '../types.js';
 import { MemoryManager } from '../utils/memory.js';
 import { rightAlignedLog } from '../utils/ui.js';
 import * as prompt from '@clack/prompts';
 import chalk from 'chalk';
+import { execSync } from 'child_process';
+import { join } from 'path';
 
 export class Coordinator {
   private planner = new Planner();
@@ -50,10 +52,8 @@ export class Coordinator {
       return;
     }
 
-    spinner.start('[TASK MANAGER] Scheduling execution waves...');
-    const schedule = this.taskManager.scheduleWaves(graph);
-    spinner.stop(`${schedule.waves.length} wave(s) scheduled.`);
-
+    spinner.start('[TASK MANAGER] Beginning dynamic execution...');
+    
     // Calculate map of all files that will be created
     const directoryManifest = graph.tasks
       .map(t => t.fileOutput)
@@ -62,12 +62,32 @@ export class Coordinator {
     // Collect commands to show user at the end
     const commandsToRun: string[] = [];
 
-    let waveCount = 1;
-    for (const wave of schedule.waves) {
-      prompt.log.info(`${chalk.bold(`[WAVE ${waveCount}/${schedule.waves.length}]`)} Executing ${wave.tasks.length} task(s) in parallel...`);
+    const completedIds = new Set<string>();
+    const failedIds = new Set<string>();
+    const inProgress = new Map<string, Promise<WorkerOutput>>();
 
-      // Run LLM calls in parallel
-      const executionPromises = wave.tasks.map(async task => {
+    spinner.stop('Executing dynamically based on dependencies...');
+
+    while (completedIds.size + failedIds.size < graph.tasks.length) {
+      const { runnable, newlyFailed } = this.taskManager.getRunnableTasks(
+        graph, 
+        completedIds, 
+        failedIds, 
+        new Set(inProgress.keys())
+      );
+      
+      for (const f of newlyFailed) {
+        failedIds.add(f);
+        state.taskRegistry[f] = { 
+          status: 'failed', 
+          agent: 'system', 
+          retryCount: 0, 
+          result: '' 
+        };
+        prompt.log.error(`  ${chalk.red('✗')} ${f}: Skipped (Dependency failed)`);
+      }
+
+      for (const task of runnable) {
         const tDef = graph.tasks.find(t => t.id === task.task_id);
         const desc = tDef ? tDef.description : 'Execute ' + task.task_id;
 
@@ -78,53 +98,80 @@ export class Coordinator {
 
         rightAlignedLog(logMsg, `[${task.agent}]`);
 
+        // Build context from dependencies
         const context: Record<string, any> = {};
         if (tDef && tDef.dependencies) {
           for (const dep of tDef.dependencies) {
-            context[dep] = state.taskRegistry[dep]?.result || 'No output.';
+            // deep copy to avoid mutations
+            const depRes = state.taskRegistry[dep]?.result || 'No output.';
+            context[dep] = JSON.parse(JSON.stringify(depRes));
           }
         }
 
-        return this.worker.execute(task, desc, context, config, graph.projectName, tDef?.fileOutput, directoryManifest, request);
-      });
+        const executePromise = this.worker.execute(
+          task, 
+          desc, 
+          context, 
+          config, 
+          graph.projectName, 
+          tDef?.fileOutput, 
+          directoryManifest, 
+          1, 
+          3
+        ).then(result => {
+          inProgress.delete(task.task_id);
+          
+          state.taskRegistry[result.task_id] = {
+            status: result.status,
+            agent: result.agent,
+            retryCount: 0,
+            result: result.result
+          };
 
-      const results = await Promise.all(executionPromises);
+          if (result.status === 'completed') {
+            completedIds.add(result.task_id);
+          } else {
+            failedIds.add(result.task_id);
+          }
 
-      // Process results
-      for (const result of results) {
-        state.taskRegistry[result.task_id] = {
-          status: result.status,
-          agent: result.agent,
-          retryCount: 0,
-          result: result.result
-        };
+          if (result.outputType === 'command' && result.result.trim().length > 0) {
+            commandsToRun.push(result.result.trim());
+          }
 
-        // If it's a command, collect it to show user
-        if (result.outputType === 'command' && result.result.trim().length > 0) {
-          commandsToRun.push(result.result.trim());
-        }
+          // Show per-task status asynchronously as they finish
+          if (result.status === 'failed') {
+            prompt.log.error(`  ${chalk.red('✗')} ${result.task_id}: ${result.errors?.join(', ') || 'Failed'}`);
+          } else if (result.outputType === 'command') {
+            prompt.log.info(`  ${chalk.yellow('⚡')} ${result.task_id}: Command detected (will show below)`);
+          } else if (result.artifacts && result.artifacts.length > 0) {
+            prompt.log.success(`  ${chalk.green('✓')} ${result.task_id}: ${result.artifacts[0]}`);
+          } else {
+            prompt.log.success(`  ${chalk.green('✓')} ${result.task_id}: Done`);
+          }
 
-        // Show per-task status
-        if (result.status === 'failed') {
-          prompt.log.error(`  ${chalk.red('✗')} ${result.task_id}: ${result.errors.join(', ')}`);
-        } else if (result.outputType === 'command') {
-          prompt.log.info(`  ${chalk.yellow('⚡')} ${result.task_id}: Command detected (will show below)`);
-        } else if (result.artifacts.length > 0) {
-          prompt.log.success(`  ${chalk.green('✓')} ${result.task_id}: ${result.artifacts[0]}`);
-        } else {
-          prompt.log.success(`  ${chalk.green('✓')} ${result.task_id}: Done`);
-        }
+          return result;
+        });
+
+        inProgress.set(task.task_id, executePromise);
       }
 
-      prompt.log.success(`Wave ${waveCount} completed!`);
-      waveCount++;
+      // Wait if tasks are running but no new tasks can be scheduled yet
+      if (inProgress.size > 0 && runnable.length === 0 && newlyFailed.length === 0) {
+        await Promise.race(inProgress.values());
+      } else if (inProgress.size === 0 && runnable.length === 0 && newlyFailed.length === 0) {
+        prompt.log.error("Stalemate: Cannot resolve further tasks due to missing dependencies or cycles.");
+        break;
+      }
     }
+
+    prompt.log.success(`Execution completed!`);
 
     // Show collected commands to user
     if (commandsToRun.length > 0) {
       console.log();
-      prompt.log.warn(chalk.bold.yellow('📋 Commands to run manually:'));
+      prompt.log.warn(chalk.bold.yellow('📋 Commands suggested by AI:'));
       console.log(chalk.dim('┌─────────────────────────────────────────'));
+      const activeProjectName = graph.projectName || 'project';
       for (const cmd of commandsToRun) {
         for (const line of cmd.split('\n')) {
           if (line.trim()) {
@@ -134,7 +181,26 @@ export class Coordinator {
       }
       console.log(chalk.dim('└─────────────────────────────────────────'));
       console.log();
-      prompt.log.info(chalk.dim('Copy and run these commands in your project directory.'));
+
+      const runCommands = await prompt.confirm({
+        message: 'Would you like to run these commands automatically?',
+        initialValue: true,
+      });
+
+      if (runCommands && !prompt.isCancel(runCommands)) {
+        const projectDir = graph.projectName ? join(process.cwd(), "workspace", graph.projectName) : process.cwd();
+        for (const cmd of commandsToRun) {
+          try {
+            prompt.log.info(chalk.dim(`Executing: ${cmd}`));
+            execSync(cmd, { cwd: projectDir, stdio: 'inherit' });
+          } catch (e: any) {
+            prompt.log.error(`Failed to execute command: ${cmd}`);
+          }
+        }
+        prompt.log.success('All commands executed.');
+      } else {
+        prompt.log.info(chalk.dim('Skipped executing commands.'));
+      }
     }
 
     // Save to memory

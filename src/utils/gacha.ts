@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, existsSync } from "fs";
-import { join } from "path";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import { join, dirname } from "path";
 
 export interface GachaState {
   lastBoxOpened: number; // timestamp
@@ -41,8 +41,11 @@ export const ANIME_ROSTER = [
 export class GachaManager {
   private filePath: string;
 
-  constructor(filePath = "gacha.json") {
+  constructor(filePath = ".forge/gacha.json") {
     this.filePath = join(process.cwd(), filePath);
+    // Ensure the hidden .forge directory exists
+    const dir = dirname(this.filePath);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     this.initFile();
   }
 

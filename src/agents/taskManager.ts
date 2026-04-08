@@ -1,46 +1,39 @@
-import { TaskGraph, WaveSchedule, ExecutionWave, Task } from '../types.js';
+import { TaskGraph, WaveTask, Task } from '../types.js';
 
 export class TaskManager {
-  scheduleWaves(graph: TaskGraph): WaveSchedule {
-    const waves: ExecutionWave[] = [];
-    const pendingTasks = [...graph.tasks];
-    const completedTaskIds = new Set<string>();
-    
-    let currentWave = 1;
+  getRunnableTasks(
+    graph: TaskGraph,
+    completedIds: Set<string>,
+    failedIds: Set<string>,
+    inProgressIds: Set<string>
+  ): { runnable: WaveTask[], newlyFailed: string[] } {
+    const runnable: WaveTask[] = [];
+    const newlyFailed: string[] = [];
+    let workerCounter = inProgressIds.size + 1;
 
-    while (pendingTasks.length > 0) {
-      const runnableTasks: Task[] = [];
-      const remainingTasks: Task[] = [];
-
-      for (const t of pendingTasks) {
-        const depsMet = t.dependencies.every(dep => completedTaskIds.has(dep));
-        if (depsMet) {
-          runnableTasks.push(t);
-        } else {
-          remainingTasks.push(t);
-        }
+    for (const t of graph.tasks) {
+      if (completedIds.has(t.id) || failedIds.has(t.id) || inProgressIds.has(t.id)) {
+        continue; // Already processed or in progress
       }
 
-      if (runnableTasks.length === 0 && pendingTasks.length > 0) {
-        throw new Error("Cyclic dependency detected in task graph, or missing dependency.");
+      // If any dependency has failed, this task cannot run
+      const hasFailedDep = t.dependencies.some(dep => failedIds.has(dep));
+      if (hasFailedDep) {
+        newlyFailed.push(t.id);
+        continue;
       }
 
-      waves.push({
-        wave: currentWave,
-        tasks: runnableTasks.map((t, idx) => ({
+      // Check if all dependencies are completed
+      const depsMet = t.dependencies.every(dep => completedIds.has(dep));
+      if (depsMet) {
+        runnable.push({
           task_id: t.id,
-          agent: `Worker-${currentWave}-${idx + 1}`,
+          agent: `Worker-${workerCounter++}`,
           priority: t.complexity === 'high' ? 'high' : 'low'
-        }))
-      });
-
-      for (const t of runnableTasks) completedTaskIds.add(t.id);
-      
-      pendingTasks.length = 0;
-      pendingTasks.push(...remainingTasks);
-      currentWave++;
+        });
+      }
     }
 
-    return { waves };
+    return { runnable, newlyFailed };
   }
 }

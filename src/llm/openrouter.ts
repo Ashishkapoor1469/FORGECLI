@@ -6,9 +6,15 @@ export class OpenRouterClient {
   private client: OpenAI;
 
   constructor() {
+    const apiKey = process.env.OPENROUTER_API_KEY || 'dummy_key';
     this.client = new OpenAI({
       baseURL: 'https://openrouter.ai/api/v1',
-      apiKey: process.env.OPENROUTER_API_KEY || 'dummy_key',
+      apiKey: apiKey,
+      defaultHeaders: {
+        "HTTP-Referer": "http://localhost:3000",
+        "X-Title": "FORGECLI",
+        "Authorization": `Bearer ${apiKey}`
+      }
     });
   }
 
