@@ -64,6 +64,13 @@ export class MemoryManager {
     this.lock();
   }
 
+  clearMemories() {
+    this.unlock();
+    const encrypted = encrypt(JSON.stringify([]));
+    writeFileSync(this.filePath, encrypted, 'utf-8');
+    this.lock();
+  }
+
   getMemorySummary(): string {
     const memory = this.getMemories();
     if (memory.length === 0) return 'No previous actions.';

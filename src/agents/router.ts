@@ -26,8 +26,8 @@ Output schema must be strict JSON:
     try {
       if (config.provider === "openrouter") {
         result = await this.openRouter.generateJson(
-          request,
           systemPrompt,
+          request,
           config.model,
         );
       } else {

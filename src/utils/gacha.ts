@@ -60,7 +60,7 @@ export class GachaManager {
     }
   }
 
-  private getState(): GachaState {
+  getState(): GachaState {
     try {
       const encrypted = readFileSync(this.filePath, "utf-8");
       if (!encrypted.trim()) {
@@ -92,6 +92,14 @@ export class GachaManager {
     const encrypted = encrypt(JSON.stringify(state));
     writeFileSync(this.filePath, encrypted, "utf-8");
     this.lock();
+  }
+
+  reset() {
+    this.saveState({
+      lastBoxOpened: 0,
+      unlockedCharacters: [],
+      activeBuddy: null,
+    });
   }
 
   getCollection(): string[] {

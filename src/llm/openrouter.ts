@@ -21,7 +21,9 @@ export class OpenRouterClient {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/Ashishkapoor1469/FORGECLI",
+        "X-Title": "Forge CLI"
       },
       body: JSON.stringify(body)
     });
@@ -34,7 +36,6 @@ export class OpenRouterClient {
     return res.json();
   }
 
-  // ⚡ Normal task
   async executeTask(systemPrompt: string, prompt: string, model: string) {
     const data = await this.request({
       model,
@@ -47,28 +48,39 @@ export class OpenRouterClient {
     return data.choices?.[0]?.message?.content || "";
   }
 
-  // 🧠 JSON task
   async generateJson(systemPrompt: string, prompt: string, model: string) {
-    const content = await this.executeTask(
-      systemPrompt + "\nReturn ONLY JSON.",
-      prompt,
-      model
-    );
+    const data = await this.request({
+      model,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: systemPrompt + "\nIMPORTANT: You must return ONLY valid, parsable JSON." },
+        { role: "user", content: prompt }
+      ]
+    });
+
+    const content = data.choices?.[0]?.message?.content || "";
 
     try {
       return JSON.parse(content);
     } catch {
-      throw new Error("❌ JSON parse failed:\n" + content);
+      // In case the model wrapped it in markdown code blocks
+      const cleanJson = content.replace(/^```json\s*/, "").replace(/\s*```$/, "").trim();
+      try {
+        return JSON.parse(cleanJson);
+      } catch {
+        throw new Error("❌ JSON parse failed:\n" + content);
+      }
     }
   }
 
-  // 🌊 Streaming
   async *streamTask(systemPrompt: string, prompt: string, model: string) {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/Ashishkapoor1469/FORGECLI",
+        "X-Title": "Forge CLI"
       },
       body: JSON.stringify({
         model,
@@ -80,19 +92,26 @@ export class OpenRouterClient {
       })
     });
 
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(`❌ OpenRouter Stream Error: ${res.status} - ${errorText}`);
+    }
     if (!res.body) throw new Error("No stream body");
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
+    let buffer = "";
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const chunk = decoder.decode(value);
-      const lines = chunk.split("\n").filter(l => l.startsWith("data:"));
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || ""; // keep incomplete line in buffer
 
       for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
         const json = line.replace("data:", "").trim();
         if (json === "[DONE]") return;
 

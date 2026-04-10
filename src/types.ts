@@ -56,4 +56,5 @@ export interface GlobalState {
 export interface ProviderConfig {
   provider: 'openrouter' | 'ollama';
   model: string;
+  activeProject?: string;
 }

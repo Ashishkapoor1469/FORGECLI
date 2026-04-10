@@ -51,9 +51,11 @@ export class WorkerAgent {
     taskDescription: string,
     context: Record<string, any>,
     config: ProviderConfig,
+    globalObjective: string,
     projectName?: string,
     fileOutput?: string,
     directoryManifest?: string[],
+    existingCode?: string,
     attempt: number = 1,
     maxRetries: number = 3
   ): Promise<WorkerOutput> {
@@ -64,9 +66,16 @@ CRITICAL RULE: If you are building an HTML file, DO NOT write inline CSS or inli
 You must explicitly use relative paths (e.g. <link rel="stylesheet" href="./styles.css"> or <script src="./scripts.js">) to link to the exact sibling files listed in the Architecture!`;
     }
 
+    let existingCodeInstruction = "";
+    if (existingCode) {
+      existingCodeInstruction = `\nWARNING: THIS FILE ALREADY EXISTS!\nEXISTING SOURCE CODE:\n\`\`\`\n${existingCode}\n\`\`\`\nIMPORTANT: You must output the ENTIRE modified file with all required updates applied cleanly without breaking existing logic!\n`;
+    }
+
     const systemPrompt = `You are a precise WORKER agent executing a coding task.
+GLOBAL MISSION: ${globalObjective}
+CURRENT SPECIFIC TASK: ${taskDescription}
 Context from previous tasks: ${JSON.stringify(context, null, 2)}
-${pathingInstruction}
+${pathingInstruction}${existingCodeInstruction}
 
 CRITICAL RULES:
 1. Output ONLY the raw source code for the file being created.
@@ -161,9 +170,11 @@ CRITICAL RULES:
           taskDescription,
           context,
           config,
+          globalObjective,
           projectName,
           fileOutput,
           directoryManifest,
+          existingCode,
           attempt + 1,
           maxRetries
         );

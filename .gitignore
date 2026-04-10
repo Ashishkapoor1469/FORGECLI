@@ -4,3 +4,5 @@ node_modules
 #workspace
 workspace/*
 animation.ts
+#env
+.env

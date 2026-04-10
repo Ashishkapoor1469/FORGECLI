@@ -10,10 +10,13 @@ export class Planner {
     request: string,
     config: ProviderConfig,
     memorySummary: string,
+    workspaceContext: string = ""
   ): Promise<TaskGraph> {
     const systemPrompt = `You are the PLANNER agent in a multi-agent coding system.
 Your job is to read a user request and decompose it into a minimal, atomic task graph.
 Each task MUST produce a source code file — never a shell command.
+
+${workspaceContext}
 
 CRITICAL RULES:
 1. Every task must have a "fileOutput" that is a real source file path (e.g., "src/index.js", "package.json").
@@ -21,7 +24,7 @@ CRITICAL RULES:
 3. NEVER create tasks whose output would be shell commands (npm, mkdir, cd, pip, etc.).
 4. Identify ALL parallelizable paths explicitly — tasks with no shared dependencies should run in the same wave.
 5. Mark inter-task dependencies precisely using task IDs. Only add a dependency if the task truly needs the output of another task.
-6. Use a descriptive, kebab-case projectName (e.g., "express-api-server", "react-todo-app").
+6. Use a descriptive, kebab-case projectName (e.g., "express-api-server", "react-todo-app"). If EXISTING PROJECT ARCHITECTURE is provided, use that project's existing name!
 7. Keep tasks atomic — one file per task.
 
 Context from previous iterations:

@@ -2,7 +2,6 @@ import * as prompt from "@clack/prompts";
 import chalk from "chalk";
 import logUpdate from "log-update";
 
-// We keep MASCOTS as multi-frame arrays now
 export const MASCOTS: Record<string, string[][]> = {
   Snowman: [
     [
@@ -101,7 +100,7 @@ export const MASCOTS: Record<string, string[][]> = {
   ]
 };
 
-/** Pick a random mascot each time the CLI boots */
+
 export function getRandomMascotName(): string {
   const names = Object.keys(MASCOTS).filter(n => n !== 'Default');
   return names[Math.floor(Math.random() * names.length+1)];
@@ -139,9 +138,6 @@ export function rightAlignedLog(leftText: string, rightText: string) {
   console.log(`│  ${leftText}${padding}${chalk.dim(rightText)}`);
 }
 
-/**
- * Splits text into lines wrapping at a specific max width.
- */
 function wordWrap(text: string, maxWidth: number): string[] {
   const lines: string[] = [];
   const rawLines = text.split('\n');
@@ -162,9 +158,6 @@ function wordWrap(text: string, maxWidth: number): string[] {
   return lines;
 }
 
-/**
- * Renders the streamed chat alongside an animated mascot.
- */
 export async function streamSideBySideChat(
   chatStream: AsyncIterable<string>,
   activeMascotName: string | null
@@ -204,7 +197,7 @@ export async function streamSideBySideChat(
   return fullResponse;
 }
 
-// ── Global Floating Mascot ──
+//  Global Floating Mascot
 
 let globalAnimationInterval: NodeJS.Timeout | null = null;
 
@@ -216,38 +209,55 @@ export function startGlobalMascot(activeMascotName: string | null) {
   let currentFrame = 0;
 
   const drawMascot = () => {
-      const cols = process.stdout.columns;
+      const cols = process.stdout.columns || 80;
       const rows = process.stdout.rows || 24;
+      
+      // Calculate layout
       const dividerCol = Math.floor(cols * 0.85);
       const rightPaneStartX = dividerCol + 2; 
       
-      // Save cursor position
-      process.stdout.write('\x1b[s');
+      // Avoid printing to the exact edge (cols) to prevent terminal auto-wrap and scrolling
+      const MASCOT_WIDTH = Math.max(0, cols - rightPaneStartX);
+      const rightBg = " ".repeat(MASCOT_WIDTH);
       
-      // Draw 70/30 Global Divider Line
+      let out = "";
+      
+      // Save cursor
+      out += '\x1b[s';
+      
+      // Draw 85/15 Global Divider Line
       for (let r = 1; r < rows; r++) {
-         process.stdout.write(`\x1b[${r};${dividerCol}H${chalk.dim('│')}`);
+         out += `\x1b[${r};${dividerCol}H${chalk.dim('│')}`;
       }
       
       const frame = mascotFrames[currentFrame];
-      const startRow = rows - frame.length - 1;
-      const MASCOT_WIDTH = cols - dividerCol - 3;
+      // Keep safety margin at bottom to prevent scrolling the terminal
+      const startRow = (rows - 1) - frame.length - 1;
       
       // Clear the ENTIRE right pane above the mascot to erase fast-scroll trails
       for (let r = 1; r < startRow; r++) {
-          process.stdout.write(`\x1b[${r};${rightPaneStartX}H`);
-          process.stdout.write(" ".repeat(MASCOT_WIDTH));
+          out += `\x1b[${r};${rightPaneStartX}H${rightBg}`;
       }
       
+      // Draw mascot
       for (let i = 0; i < frame.length; i++) {
-          process.stdout.write(`\x1b[${startRow + i};${rightPaneStartX}H`);
-          // Ensure each line clears the rest of the column width
-          const lineStr = frame[i] + " ".repeat(Math.max(0, MASCOT_WIDTH - frame[i].replace(/\x1B\[\d+m/g, '').length));
-          process.stdout.write(lineStr);
+          const rawLen = frame[i].replace(/\x1B\[\d+m/g, '').length;
+          const padLen = Math.max(0, MASCOT_WIDTH - rawLen);
+          const lineStr = frame[i] + " ".repeat(padLen);
+          out += `\x1b[${startRow + i};${rightPaneStartX}H${lineStr}`;
       }
       
-      // Restore cursor position
-      process.stdout.write('\x1b[u');
+      // Clear below mascot if needed, to the bottom-1
+      for (let r = startRow + frame.length; r < Math.max(rows, startRow + frame.length); r++) {
+          if (r < rows) {
+              out += `\x1b[${r};${rightPaneStartX}H${rightBg}`;
+          }
+      }
+
+      // Restore cursor
+      out += '\x1b[u';
+      
+      process.stdout.write(out);
       currentFrame = (currentFrame + 1) % mascotFrames.length;
   };
 

@@ -1,6 +1,8 @@
 import { Planner } from './planner.js';
 import { TaskManager } from './taskManager.js';
 import { WorkerAgent } from './worker.js';
+import { ReviewerAgent } from './reviewer.js';
+import { EditorAgent } from './editor.js';
 import { GlobalState, ProviderConfig, WaveTask, WorkerOutput } from '../types.js';
 import { MemoryManager } from '../utils/memory.js';
 import { rightAlignedLog } from '../utils/ui.js';
@@ -9,10 +11,15 @@ import chalk from 'chalk';
 import { execSync } from 'child_process';
 import { join } from 'path';
 
+import { getDirectoryTree } from '../utils/fs.js';
+import * as fs from 'fs';
+
 export class Coordinator {
   private planner = new Planner();
   private taskManager = new TaskManager();
   private worker = new WorkerAgent();
+  private reviewer = new ReviewerAgent();
+  private editor = new EditorAgent();
   private memory = new MemoryManager();
 
   async processRequest(request: string, spinner: any, config: ProviderConfig): Promise<void> {
@@ -24,7 +31,22 @@ export class Coordinator {
 
     spinner.message('[PLANNER] Generating task graph...');
     const memorySummary = this.memory.getMemorySummary();
-    const graph = await this.planner.createPlan(request, config, memorySummary);
+    
+    // Feature: Workspace Context Awareness
+    let workspaceContext = "";
+    if (config.activeProject) {
+       const projectPath = join(process.cwd(), "workspace", config.activeProject);
+       if (fs.existsSync(projectPath)) {
+         const fileTree = getDirectoryTree(projectPath);
+         workspaceContext = `EXISTING PROJECT ARCHITECTURE:\n${JSON.stringify(fileTree, null, 2)}\nIMPORTANT: Edit the existing files instead of creating new ones if they already exist to achieve the goal.\n`;
+       }
+    }
+
+    const graph = await this.planner.createPlan(request, config, memorySummary, workspaceContext);
+    
+    if (config.activeProject) {
+        graph.projectName = config.activeProject;
+    }
 
     spinner.stop('Task Graph generated.');
 
@@ -108,17 +130,29 @@ export class Coordinator {
           }
         }
 
+        // If the file already exists, read it so the Worker edits it instead of overwriting it
+        let existingCode: string | undefined = undefined;
+        if (graph.projectName && tDef?.fileOutput) {
+           const targetPath = join(process.cwd(), "workspace", graph.projectName, tDef.fileOutput);
+           if (fs.existsSync(targetPath)) {
+               existingCode = fs.readFileSync(targetPath, "utf-8");
+               prompt.log.info(`  ${chalk.dim('↑')} ${task.task_id}: Reading existing file ${tDef.fileOutput}`);
+           }
+        }
+
         const executePromise = this.worker.execute(
           task, 
           desc, 
           context, 
           config, 
+          request, // Global Objective
           graph.projectName, 
           tDef?.fileOutput, 
           directoryManifest, 
+          existingCode, // Pass existing code for editing
           1, 
           3
-        ).then(result => {
+        ).then(async result => {
           inProgress.delete(task.task_id);
           
           state.taskRegistry[result.task_id] = {
@@ -138,13 +172,43 @@ export class Coordinator {
             commandsToRun.push(result.result.trim());
           }
 
-          // Show per-task status asynchronously as they finish
-          if (result.status === 'failed') {
+          // Evaluate self-correction loop
+          if (result.outputType === 'code' && result.artifacts && result.artifacts.length > 0) {
+            prompt.log.info(`  ${chalk.dim('🔍')} ${result.task_id}: Reviewing generated code...`);
+            let currentCode = result.result;
+            let currentArtifactPath = result.artifacts[0];
+            
+            let retryCount = 0;
+            const MAX_VERIFICATION_RETRIES = 2; // Keep loop short
+
+            while (retryCount < MAX_VERIFICATION_RETRIES) {
+              const reviewInstructions = await this.reviewer.evaluate(request, desc, currentCode, config);
+              if (reviewInstructions.length === 0) {
+                 prompt.log.success(`  ${chalk.green('✓')} ${result.task_id}: Code verified as correct.`);
+                 break; // Passed checks
+              }
+
+              prompt.log.warn(`  ${chalk.yellow('⚠')} ${result.task_id}: Issues found (Attempt ${retryCount+1}/${MAX_VERIFICATION_RETRIES}). Editing...`);
+              for (const instr of reviewInstructions) {
+                 prompt.log.message(`    ${chalk.dim('Fix needed:')} ${instr.issue}`);
+              }
+
+              // Editor patches the array
+              currentCode = await this.editor.patch(currentCode, reviewInstructions, config);
+
+              // Save the patched code back to disk
+              const fs = require('fs');
+              fs.writeFileSync(currentArtifactPath, currentCode, 'utf-8');
+
+              retryCount++;
+            }
+            if (retryCount >= MAX_VERIFICATION_RETRIES) {
+              prompt.log.warn(`  ${chalk.yellow('⚠')} ${result.task_id}: Max verification retries reached for edits.`);
+            }
+          } else if (result.status === 'failed') {
             prompt.log.error(`  ${chalk.red('✗')} ${result.task_id}: ${result.errors?.join(', ') || 'Failed'}`);
           } else if (result.outputType === 'command') {
             prompt.log.info(`  ${chalk.yellow('⚡')} ${result.task_id}: Command detected (will show below)`);
-          } else if (result.artifacts && result.artifacts.length > 0) {
-            prompt.log.success(`  ${chalk.green('✓')} ${result.task_id}: ${result.artifacts[0]}`);
           } else {
             prompt.log.success(`  ${chalk.green('✓')} ${result.task_id}: Done`);
           }

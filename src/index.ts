@@ -39,6 +39,7 @@ function showHelp() {
     { cmd: "/buddy", desc: "Set an Anime character as your chat companion" },
     { cmd: "/clear", desc: "Clear the terminal screen" },
     { cmd: "/memory", desc: "Show memory stats (entries count, file size)" },
+    { cmd: "/admin", desc: "Access encrypted vault (Password required)" },
   ];
 
   for (const { cmd, desc } of commands) {
@@ -67,6 +68,7 @@ async function handleModelSelection() {
     savedModels.forEach((m, i) => {
        options.push({ value: `saved:${i}`, label: `💾 ${m.provider} (${m.model})` });
     });
+    options.push({ value: "delete", label: "❌ Delete a Saved Model" });
   }
   
   options.push({ value: "ollama", label: "Ollama (New)" });
@@ -81,6 +83,27 @@ async function handleModelSelection() {
 
   let provider = "";
   let modelStr = "";
+
+  if (selection === "delete") {
+    const delOptions = savedModels.map((m, i) => ({
+      value: i,
+      label: `🗑  ${m.provider} (${m.model})`
+    }));
+    delOptions.push({ value: -1, label: "Cancel" });
+
+    const delTarget = await prompt.select({
+      message: "Which model do you want to delete?",
+      options: delOptions,
+    });
+
+    if (prompt.isCancel(delTarget) || delTarget === -1) return;
+
+    const delIdx = delTarget as number;
+    const deletedModel = savedModels.splice(delIdx, 1)[0];
+    writeFileSync(savedModelsPath, JSON.stringify(savedModels, null, 2), "utf-8");
+    prompt.log.success(`Deleted ${deletedModel.provider} (${deletedModel.model}) from saved list.`);
+    return;
+  }
 
   if (typeof selection === "string" && selection.startsWith("saved:")) {
      const idx = parseInt(selection.split(":")[1]);
@@ -173,6 +196,7 @@ async function handleCreateProject() {
         console.log(`  ${chalk.cyan("$")} cd workspace/${name}`);
         console.log(`  ${chalk.cyan("$")} bun install`);
         console.log(`  ${chalk.cyan("$")} bun run dev`);
+        config.activeProject = name;
         break;
       }
 
@@ -201,6 +225,7 @@ async function handleCreateProject() {
         console.log(`  ${chalk.cyan("$")} cd workspace/${name}`);
         console.log(`  ${chalk.cyan("$")} npm install`);
         console.log(`  ${chalk.cyan("$")} npm run dev`);
+        config.activeProject = name;
         break;
       }
 
@@ -215,6 +240,7 @@ async function handleCreateProject() {
         prompt.log.info(chalk.dim("Next steps:"));
         console.log(`  ${chalk.cyan("$")} cd workspace/${name}`);
         console.log(`  ${chalk.cyan("$")} npm run dev`);
+        config.activeProject = name;
         break;
       }
 
@@ -247,6 +273,7 @@ app.listen(PORT, () => {
         prompt.log.info(chalk.dim("Next steps:"));
         console.log(`  ${chalk.cyan("$")} cd workspace/${name}`);
         console.log(`  ${chalk.cyan("$")} node index.js`);
+        config.activeProject = name;
         break;
       }
 
@@ -383,14 +410,67 @@ function showMemoryStats() {
   }
 }
 
+async function handleAdminMenu() {
+  const pass = await prompt.password({
+    message: "Enter Admin Password:",
+  });
+
+  if (prompt.isCancel(pass)) return;
+  
+  const expectedPass = process.env.ADMIN_PASSWORD || "admin123";
+  if (pass !== expectedPass) {
+    prompt.log.error("Incorrect password! Access denied.");
+    return;
+  }
+
+  prompt.log.success("Access Granted! Welcome to the Admin Vault.");
+
+  while (true) {
+    const action = await prompt.select({
+      message: "Admin Options",
+      options: [
+        { value: "view_memory", label: "Read Encrypted Memory" },
+        { value: "clear_memory", label: "Clear Encrypted Memory" },
+        { value: "view_gacha", label: "Read Encrypted Gacha State" },
+        { value: "reset_gacha", label: "Reset Gacha State" },
+        { value: "back", label: "Go Back" },
+      ]
+    });
+
+    if (action === "back" || prompt.isCancel(action)) break;
+
+    if (action === "view_memory") {
+      const mems = memory.getMemories();
+      prompt.log.info(chalk.dim(JSON.stringify(mems, null, 2)));
+    } else if (action === "clear_memory") {
+      const confirm = await prompt.confirm({ message: "Are you SURE you want to permanently delete all memories?" });
+      if (confirm && !prompt.isCancel(confirm)) {
+        memory.clearMemories();
+        prompt.log.success("Memories wiped and re-encrypted.");
+      }
+    } else if (action === "view_gacha") {
+      const state = gacha.getState();
+      prompt.log.info(chalk.dim(JSON.stringify(state, null, 2)));
+    } else if (action === "reset_gacha") {
+      const confirm = await prompt.confirm({ message: "Are you SURE you want to wipe all unlocked characters?" });
+      if (confirm && !prompt.isCancel(confirm)) {
+        gacha.reset();
+        stopGlobalMascot();
+        prompt.log.success("Gacha state reset to default.");
+      }
+    }
+  }
+}
+
 async function main() {
   showIntro();
 
   const buddy = gacha.getActiveBuddy() || getRandomMascotName();
   startGlobalMascot(buddy);
   const buddyStr = buddy ? ` | Buddy: ${chalk.magenta(buddy)}` : "";
+  const workspaceStr = config.activeProject ? ` | Workspace: ${chalk.green(config.activeProject)}` : "";
   prompt.log.info(
-    `Model: ${chalk.cyan(`${config.provider}/${config.model}`)}${buddyStr} | Type ${chalk.bold("/help")} for commands`,
+    `Model: ${chalk.cyan(`${config.provider}/${config.model}`)}${workspaceStr}${buddyStr} | Type ${chalk.bold("/help")} for commands`,
   );
 
   while (true) {
@@ -428,12 +508,43 @@ async function main() {
       await handleBuddyMenu();
       continue;
     }
+    if (input.startsWith("/cd ")) {
+      const folder = input.replace("/cd ", "").trim();
+      const targetPath = join(process.cwd(), "workspace", folder);
+      if (!existsSync(targetPath)) {
+        prompt.log.error(`Directory workspace/${folder} does not exist.`);
+      } else {
+        config.activeProject = folder;
+        console.clear();
+        showIntro();
+        const b = gacha.getActiveBuddy();
+        const wsStr = ` | Workspace: ${chalk.green(config.activeProject)}`;
+        const bdStr = b ? ` | Buddy: ${chalk.magenta(b)}` : "";
+        prompt.log.info(
+          `Model: ${chalk.cyan(`${config.provider}/${config.model}`)}${wsStr}${bdStr} | Type ${chalk.bold("/help")} for commands`,
+        );
+        prompt.log.success(`Switched active workspace to ${chalk.cyan(`workspace/${folder}`)}`);
+      }
+      continue;
+    }
+    
     if (input === "/clear") {
-      console.clear();
+      process.stdout.write('\x1Bc'); // Full terminal reset (wipes scrollback buffer)
+      showIntro();
+      const activeBuddy = gacha.getActiveBuddy();
+      const wsStr = config.activeProject ? ` | Workspace: ${chalk.green(config.activeProject)}` : "";
+      const bdStr = activeBuddy ? ` | Buddy: ${chalk.magenta(activeBuddy)}` : "";
+      prompt.log.info(
+        `Model: ${chalk.cyan(`${config.provider}/${config.model}`)}${wsStr}${bdStr} | Type ${chalk.bold("/help")} for commands`,
+      );
       continue;
     }
     if (input === "/memory") {
       showMemoryStats();
+      continue;
+    }
+    if (input === "/admin") {
+      await handleAdminMenu();
       continue;
     }
 
