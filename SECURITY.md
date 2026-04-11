@@ -6,7 +6,7 @@ Forge CLI takes security seriously. As a tool that generates code and executes s
 
 If you discover a security vulnerability within Forge, please report it via one of the following methods:
 
-1. **Email**: [kapoorashish714@gmail.com](mailto:kapoorashish714@gmail.com) (Placeholder)
+1. **Email**: [kapoorashish714@gmail.com](mailto:kapoorashish714@gmail.com)
 2. **GitHub Issues**: Open a new issue with the "security" label (for non-disclosing reports).
 
 Please do not disclose security issues publicly until we have reached a resolution.
