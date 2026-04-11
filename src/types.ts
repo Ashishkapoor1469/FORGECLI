@@ -46,6 +46,7 @@ export interface GlobalState {
     agent: string;
     retryCount: number;
     result: any;
+    lastError?: string;
   }>;
   fileManifest: Record<string, {
     createdBy: string;

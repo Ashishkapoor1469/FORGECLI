@@ -26,6 +26,16 @@
   - [Workspace Context Awareness](#workspace-context-awareness)
   - [Command Detection & Auto-Execution](#command-detection--auto-execution)
   - [Chat Mode](#chat-mode)
+- [Advanced Features](#advanced-features)
+  - [Smart Memory Filtering](#smart-memory-filtering)
+  - [Resume & Continue Builds](#resume--continue-builds)
+  - [Conflict-Safe Parallel Execution](#conflict-safe-parallel-execution)
+  - [Project Evolution Mode](#project-evolution-mode)
+  - [Semantic Code Understanding](#semantic-code-understanding)
+  - [Intelligent Refactoring](#intelligent-refactoring)
+  - [Failure Recovery System](#failure-recovery-system)
+  - [Task Validation](#task-validation)
+  - [Output Consistency Checking](#output-consistency-checking)
 - [Terminal Layout](#terminal-layout)
 - [Providers & Models](#providers--models)
   - [Ollama (Local)](#ollama-local)
@@ -68,6 +78,15 @@
 | 🎮 **Anime Gacha System** | Daily loot boxes to unlock Anime character companions |
 | 🦊 **Dynamic Buddy Personas** | Your buddy companion alters the LLM's chat personality |
 | 🎨 **Animated ASCII Mascots** | Persistent animated mascot in the right pane of a split terminal |
+| 🧹 **Smart Memory Filtering** | Only essential context (project name, files, tech stack) is sent to the LLM — never raw logs or full code |
+| 🔄 **Resume & Continue Builds** | Detects incomplete builds and resumes from the last valid state, skipping completed tasks |
+| 🛡️ **Conflict-Safe Parallel** | Prevents race conditions by deferring tasks that target the same file to sequential execution |
+| 🌱 **Project Evolution Mode** | Extends existing projects by modifying files in-place — never recreates or duplicates |
+| 🔎 **Semantic Code Understanding** | Analyzes project structure (tech stack, entry points, routes, components) before planning |
+| ♻️ **Intelligent Refactoring** | Detects refactor/improve tasks and applies minimal, behavior-preserving changes |
+| 🩹 **Failure Recovery** | Retries failed tasks once with error context, then logs failures and continues |
+| ✅ **Task Validation** | Pre-execution graph validation: rejects vague tasks, detects circular deps, warns on file conflicts |
+| 🔗 **Output Consistency** | Post-build cross-file reference checking: validates HTML links, JS imports, and suggests fixes |
 
 ---
 
@@ -82,13 +101,29 @@ User Input
 └─────────────────────┘
     │ "build"
     ▼
-┌─────────────────────┐
-│      PLANNER        │  ── Generates a TaskGraph (JSON) with dependencies
-└─────────────────────┘     + Workspace context (existing files) injected
+┌──────────────────────────────┐
+│   SMART MEMORY FILTER        │  ── Extract project names, file structures, tech stacks
+│   + RESUME DETECTION         │  ── Detect incomplete builds → offer to resume
+└──────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────┐
+│   SEMANTIC ANALYZER          │  ── Analyze project tech stack, entry points, components
+└──────────────────────────────┘
     │
     ▼
 ┌─────────────────────┐
-│    TASK MANAGER     │  ── Topological sort → Dynamic dependency-based scheduling
+│      PLANNER        │  ── Generates a TaskGraph (JSON) with dependencies
+└─────────────────────┘     + Workspace context + semantic analysis + evolution mode
+    │
+    ▼
+┌──────────────────────────────┐
+│   TASK VALIDATOR             │  ── Reject vague tasks, detect cycles, warn file conflicts
+└──────────────────────────────┘
+    │
+    ▼
+┌─────────────────────┐
+│    TASK MANAGER     │  ── Conflict-safe scheduling (same-file tasks run sequentially)
 └─────────────────────┘
     │
     ▼
@@ -96,15 +131,16 @@ User Input
 │  DYNAMIC EXECUTOR (Coordinator)     │
 │  Tasks run as soon as deps resolve  │
 │  Concurrent LLM calls per wave      │
+│  Failure recovery: retry once       │
 └─────────────────────────────────────┘
     │
     ▼
 ┌──────────────────────────────┐
 │   WORKER AGENTS              │
+│   - Evolution mode (edit)    │
+│   - Refactoring detection    │
 │   - Detect code vs commands  │
-│   - Edit existing files      │
 │   - Write code to workspace  │
-│   - Show commands to user    │
 └──────────────────────────────┘
     │
     ▼
@@ -116,9 +152,12 @@ User Input
 └──────────────────────────────┘
     │
     ▼
-┌─────────────────────┐
-│   MEMORY MANAGER    │  ── AES-256 encrypted (auto-trimmed at 100 entries)
-└─────────────────────┘
+┌──────────────────────────────┐
+│   POST-EXECUTION             │
+│   - Consistency checker      │  ── Validate HTML/JS cross-file references
+│   - Failure report           │  ── List failed tasks + fix suggestions
+│   - Memory save (filtered)   │  ── AES-256 encrypted (auto-trimmed at 100)
+└──────────────────────────────┘
 ```
 
 ---
@@ -258,6 +297,7 @@ This enables iterative development — you can say *"add authentication to my Ex
 
 ### Command Detection & Auto-Execution
 
+
 Workers include a **command detection system** that prevents shell commands from being written to files:
 
 - If the LLM generates output that looks like shell commands (e.g., `npm install express`, `mkdir src`), the worker detects this and marks the output as a **command** instead of code.
@@ -287,6 +327,165 @@ When intent is `chat`, Forge streams responses token by token in an 85/15 split-
 ```
 
 Chat responses are saved to encrypted `memory.dat` so the AI accumulates context over time.
+
+---
+
+## Advanced Features
+
+Forge includes an **Advanced Features Extension** — a suite of 9 capabilities that make the build system more stable, intelligent, reliable, and realistic.
+
+### Smart Memory Filtering
+
+When accessing memory for LLM prompts, Forge extracts **only** essential context:
+- ✅ Project name, file structure, tech stack, completed/failed features
+- ❌ Never injects raw logs, full source code, or repeated outputs
+
+If memory is large, it's automatically summarized and **capped at ~2000 characters** to prevent prompt bloat. The raw memory is still available in the Admin Vault — only the LLM context is filtered.
+
+```
+Project: express-api-server
+Tech: Express, TypeScript, Node.js
+Files: src/index.ts, src/routes/auth.ts, package.json (+3 more)
+Done: Create main server entry; Add authentication middleware
+Failed: Configure WebSocket support
+```
+
+### Resume & Continue Builds
+
+If a previous build was incomplete or had failures, Forge detects it automatically:
+
+```
+📋 Previous Build Found
+  Project: react-dashboard
+  Completed: 5/8
+  Failed: task-6
+  Pending: task-7, task-8
+  From: 2026-04-10T15:30:00Z
+
+◆ Resume from last build? (Skip 5 completed tasks)
+│  ● Yes
+│  ○ No
+```
+
+**Behavior:**
+- Completed tasks are **skipped entirely** (no re-execution)
+- Failed tasks are **retried** with the same context
+- New tasks execute normally
+- The coordinator pre-populates its state from the saved session
+
+### Conflict-Safe Parallel Execution
+
+Before executing tasks in parallel, the Task Manager checks for **file output collisions**:
+
+```
+task-1 → styles.css     ┐
+task-2 → styles.css     ┘ CONFLICT → Sequential execution
+task-3 → app.js            Safe → Parallel with task-1
+```
+
+- If two tasks target the same file, only the first runs; the rest are **deferred** to the next scheduling cycle
+- In-progress file claims are also tracked — a new task won't start writing to a file that another worker is currently writing
+- Deferred tasks are logged: `⏳ task-2: Deferred (file conflict — waiting for sequential access)`
+
+### Project Evolution Mode
+
+When a project already exists, Forge activates **Evolution Mode** at two levels:
+
+**Planner Level** — The system prompt includes strict directives:
+> *"Do NOT create files that already exist — instead, your task description MUST say 'Modify \<filename\>'. Only create genuinely new files."*
+
+**Worker Level** — When existing code is passed:
+> *"You are in EVOLUTION mode. Preserve all working logic. Apply minimal, targeted changes. Do NOT rewrite from scratch."*
+
+This prevents the common failure pattern of AI agents blindly regenerating files and breaking existing features.
+
+### Semantic Code Understanding
+
+Before modifying a project, the **Semantic Analyzer** (`src/utils/semanticAnalyzer.ts`) builds a structured understanding:
+
+| Analysis | How |
+|---|---|
+| **Tech Stack** | Reads `package.json` deps + file extensions |
+| **Entry Points** | Identifies `index.ts`, `main.js`, `app.tsx`, etc. |
+| **Routes** | Finds files containing `route`, `router`, or `/api/` |
+| **Components** | Detects `.tsx`, `.jsx`, `.vue`, `.svelte` files in `src/` |
+| **Styles** | Collects `.css`, `.scss`, `.sass`, `.less` files |
+
+This summary is injected into the Planner's context, enabling more informed task decomposition — the LLM knows where logic belongs before creating tasks.
+
+### Intelligent Refactoring
+
+When a task description contains refactoring keywords (`refactor`, `improve`, `optimize`, `clean up`, `simplify`, `restructure`, `modernize`...), the Worker activates **Refactoring Mode**:
+
+- Make **minimal changes** — only modify what needs improvement
+- **Preserve all working logic** and behavior
+- Do NOT rename public exports or change function signatures unless necessary
+- Improve structure, readability, and efficiency without breaking anything
+
+This prevents the common problem of AI agents "improving" code by rewriting it entirely and introducing regressions.
+
+### Failure Recovery System
+
+When a task fails during execution:
+
+1. **Retry once** — The coordinator automatically retries the task with the error message injected into the worker's prompt:
+   > *"The previous attempt failed with: 'JSON parse error'. Please fix the issue."*
+
+2. **If retry fails** — Log the failure and **continue executing** other independent tasks. Do not halt the entire pipeline.
+
+3. **Failure Report** — After execution completes, a clear report is printed:
+
+```
+❌ Failure Report — 2 task(s) failed:
+┌─────────────────────────────────────────
+│  task-4
+│    Error: Rate limited (429)
+│    Fix: Rate limited — wait a few seconds and retry, or switch to a different model.
+│  task-7
+│    Error: Dependency failed
+│    Fix: Fix the upstream dependency task first.
+└─────────────────────────────────────────
+```
+
+The `suggestFix()` method provides intelligent suggestions based on error type: timeout, rate limit, JSON parse, context length, file permission, etc.
+
+### Task Validation
+
+Before execution begins, the **Task Validator** (`src/agents/taskValidator.ts`) checks the entire task graph:
+
+| Check | Action |
+|---|---|
+| Missing `fileOutput` | Task **rejected** |
+| Empty description | Task **rejected** |
+| Invalid dependency reference | Auto-cleaned (removed) |
+| Circular dependencies | Detected and **broken** (last dep removed) |
+| File output conflicts | **Warned** (handled at runtime by conflict-safe scheduling) |
+
+```
+⚠ Task Validation Warnings:
+  • [REJECT] task-5: Missing fileOutput — tasks must produce a file.
+  • [WARN] Circular dependency detected involving: task-2, task-3. Breaking cycles.
+  • [WARN] File conflict: src/index.js is targeted by tasks: task-1, task-4.
+```
+
+Rejected tasks are removed from the graph before the user sees the confirmation prompt.
+
+### Output Consistency Checking
+
+After all tasks complete, the **Consistency Checker** (`src/utils/consistencyChecker.ts`) validates cross-file references:
+
+- **HTML files** — Checks `<link href="...">` and `<script src="...">` tags point to files that actually exist in the project
+- **JS/TS files** — Checks `import ... from '...'` and `require('...')` resolve to real modules
+- **Suggestions** — If a broken reference is found, suggests the closest matching file:
+
+```
+🔗 Consistency Check — Broken References:
+  • index.html:8 → styles.csss
+    Did you mean "css/styles.css"?
+  • src/app.js:3 → ./uitls/helpers
+    Did you mean "src/utils/helpers.js"?
+  Checked 6 files, 4 clean.
+```
 
 ---
 
@@ -390,19 +589,30 @@ Every interaction is persisted to `.forge/memory.dat` (AES-256 encrypted):
     "timestamp": "2026-04-04T05:00:00Z",
     "request": "Build an express server",
     "graph": { "projectName": "express-api-server", "tasks": [...] },
-    "results": { "task-1": { "status": "completed", "result": "..." } }
+    "results": { "task-1": { "status": "completed", "result": "...", "lastError": null } }
   }
 ]
 ```
 
 **Memory management features:**
 - Auto-trimmed at **100 entries** to prevent unbounded growth
-- Only the **last 10 entries** are injected into LLM context prompts
+- **Smart filtering**: Only project names, file structures, tech stacks, and feature status are sent to the LLM — never raw code or logs
+- Context is **capped at ~2000 chars** to prevent prompt bloat
+- **Resume detection**: Scans for incomplete builds and offers to resume from the last valid state
 - Build and chat entries are tracked separately
 - Use `/memory` to see stats
 
-The memory is injected into the **Planner's** system prompt, so it naturally builds on prior context:
-> "In our previous session, you built an Express server. Now extending it with auth..."
+**Key methods in `MemoryManager`:**
+
+| Method | Purpose |
+|---|---|
+| `getFilteredContext()` | Returns structured `FilteredContext[]` with only essential fields |
+| `getFilteredContextString()` | Compact string version for LLM injection (≤2000 chars) |
+| `findResumableSession(project?)` | Finds the most recent incomplete build for a project |
+| `getMemorySummary()` | Human-readable summary of last 10 entries |
+| `getMemories()` | Raw access to all decrypted entries |
+
+The filtered memory is injected into the **Planner's** system prompt, so it naturally builds on prior context without overwhelming the LLM with noise.
 
 ---
 
@@ -500,12 +710,13 @@ The AI is explicitly instructed to use relative paths when linking files:
 FORGECLI/
 ├── src/
 │   ├── index.ts              # CLI entry point & REPL loop
-│   ├── types.ts              # TypeScript interfaces (Task, ProviderConfig, etc.)
+│   ├── types.ts              # TypeScript interfaces (Task, GlobalState, etc.)
 │   ├── agents/
-│   │   ├── coordinator.ts    # Orchestrates the full pipeline + self-correction loop
-│   │   ├── planner.ts        # Decomposes requests into TaskGraph
-│   │   ├── taskManager.ts    # Dynamic dependency-based scheduling
-│   │   ├── worker.ts         # Executes tasks, detects commands, writes files
+│   │   ├── coordinator.ts    # Orchestrates the full 8-step advanced pipeline
+│   │   ├── planner.ts        # Decomposes requests into TaskGraph (+ evolution mode)
+│   │   ├── taskManager.ts    # Conflict-safe dynamic dependency scheduling
+│   │   ├── taskValidator.ts  # Pre-execution graph validation (cycles, conflicts)
+│   │   ├── worker.ts         # Executes tasks (+ evolution, refactoring, retry context)
 │   │   ├── router.ts         # Intent detection + chat streaming
 │   │   ├── reviewer.ts       # Code quality auditor (placeholder/syntax detection)
 │   │   └── editor.ts         # Precision code patcher (line-level edits)
@@ -514,7 +725,9 @@ FORGECLI/
 │   │   └── openrouter.ts     # OpenRouter client (cloud models, streaming)
 │   └── utils/
 │       ├── ui.ts             # ASCII mascots, split-pane layout, terminal utils
-│       ├── memory.ts         # Encrypted persistent memory (.forge/memory.dat)
+│       ├── memory.ts         # Encrypted memory (+ smart filtering, resume detection)
+│       ├── semanticAnalyzer.ts # Project structure analysis (tech, routes, components)
+│       ├── consistencyChecker.ts # Post-build cross-file reference validation
 │       ├── gacha.ts          # Encrypted gacha system (.forge/gacha.dat)
 │       ├── crypto.ts         # AES-256-CBC encryption/decryption
 │       ├── fs.ts             # Directory tree reader (workspace context)
@@ -581,6 +794,10 @@ npm start       # Run compiled output
 | `/create` fails with Bun | Ensure Bun is installed: `curl -fsSL https://bun.sh/install \| bash` |
 | Encrypted data corrupted | Use `/admin` → Clear/Reset to re-initialize encrypted state |
 | Mascot rendering artifacts | Resize your terminal to at least 80 columns wide |
+| Resume prompt not appearing | Resume only triggers when an active project is set (`/cd` or `/create`) |
+| Tasks deferred endlessly | Check for circular dependencies — the validator should break them automatically |
+| Consistency check false positives | External URLs and bare npm imports are ignored; only relative paths are checked |
+| Failure recovery not helping | Some errors (rate limits, auth) can't be fixed by retry — switch models via `/model` |
 
 ---
 

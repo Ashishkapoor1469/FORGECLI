@@ -15,6 +15,12 @@ const COMMAND_PATTERNS = [
   /^(ollama|openssl|ssh|scp)\s+/im,
 ];
 
+// Keywords that indicate a refactoring / improvement task
+const REFACTOR_KEYWORDS = [
+  'refactor', 'improve', 'optimize', 'clean up', 'cleanup', 'simplify',
+  'restructure', 'reorganize', 'enhance', 'modernize', 'upgrade',
+];
+
 function isShellCommand(text: string): boolean {
   const trimmed = text.trim();
   // If the text has very few lines and matches command patterns, it's a command
@@ -42,6 +48,13 @@ function isShellCommand(text: string): boolean {
   );
 }
 
+// Detect if a task description is about refactoring/improvement.
+
+function isRefactorTask(description: string): boolean {
+  const lower = description.toLowerCase();
+  return REFACTOR_KEYWORDS.some(kw => lower.includes(kw));
+}
+
 export class WorkerAgent {
   private ollama = new OllamaClient();
   private openRouter = new OpenRouterClient();
@@ -57,7 +70,8 @@ export class WorkerAgent {
     directoryManifest?: string[],
     existingCode?: string,
     attempt: number = 1,
-    maxRetries: number = 3
+    maxRetries: number = 3,
+    previousError?: string
   ): Promise<WorkerOutput> {
     let pathingInstruction = "";
     if (directoryManifest && directoryManifest.length > 0) {
@@ -66,16 +80,49 @@ CRITICAL RULE: If you are building an HTML file, DO NOT write inline CSS or inli
 You must explicitly use relative paths (e.g. <link rel="stylesheet" href="./styles.css"> or <script src="./scripts.js">) to link to the exact sibling files listed in the Architecture!`;
     }
 
+    // PROJECT EVOLUTION MODE — stronger prompt when editing an existing file
     let existingCodeInstruction = "";
     if (existingCode) {
-      existingCodeInstruction = `\nWARNING: THIS FILE ALREADY EXISTS!\nEXISTING SOURCE CODE:\n\`\`\`\n${existingCode}\n\`\`\`\nIMPORTANT: You must output the ENTIRE modified file with all required updates applied cleanly without breaking existing logic!\n`;
+      existingCodeInstruction = `\nYou are in EVOLUTION MODE — this file already exists!
+EXISTING SOURCE CODE:
+\`\`\`
+${existingCode}
+\`\`\`
+EVOLUTION RULES:
+1. You MUST output the ENTIRE modified file with all required updates applied cleanly.
+2. PRESERVE all working logic — do NOT remove or break existing features.
+3. Apply MINIMAL, TARGETED changes to achieve the task goal.
+4. Do NOT rewrite the file from scratch — extend and modify what exists.
+5. Keep existing function signatures, variable names, and structure unless the task explicitly says to change them.
+`;
+    }
+
+    // INTELLIGENT REFACTORING — additional rules when the task is about improving code
+    let refactorInstruction = "";
+    if (isRefactorTask(taskDescription)) {
+      refactorInstruction = `\nREFACTORING MODE ACTIVE:
+1. Make minimal changes — only modify what needs improvement.
+2. Preserve ALL working logic and behavior.
+3. Improve structure, readability, and efficiency without breaking anything.
+4. Do NOT rename public exports or change function signatures unless absolutely necessary.
+5. Keep the same file structure and organization unless explicitly asked to restructure.
+`;
+    }
+
+    // FAILURE RECOVERY — inject error context on retry
+    let retryContext = "";
+    if (attempt > 1 && previousError) {
+      retryContext = `\nRETRY ATTEMPT ${attempt}/${maxRetries}:
+The previous attempt failed with this error: "${previousError}"
+Please fix the issue and generate correct output this time.
+`;
     }
 
     const systemPrompt = `You are a precise WORKER agent executing a coding task.
 GLOBAL MISSION: ${globalObjective}
 CURRENT SPECIFIC TASK: ${taskDescription}
 Context from previous tasks: ${JSON.stringify(context, null, 2)}
-${pathingInstruction}${existingCodeInstruction}
+${pathingInstruction}${existingCodeInstruction}${refactorInstruction}${retryContext}
 
 CRITICAL RULES:
 1. Output ONLY the raw source code for the file being created.
@@ -176,7 +223,8 @@ CRITICAL RULES:
           directoryManifest,
           existingCode,
           attempt + 1,
-          maxRetries
+          maxRetries,
+          e.message // Pass error context for retry
         );
       }
       return {
