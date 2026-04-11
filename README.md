@@ -22,19 +22,27 @@
 - [How It Works](#how-it-works)
   - [Intent Routing](#intent-routing)
   - [The Build Pipeline](#the-build-pipeline)
-  - [Command Detection](#command-detection)
+  - [Self-Correction Loop (Reviewer + Editor)](#self-correction-loop-reviewer--editor)
+  - [Workspace Context Awareness](#workspace-context-awareness)
+  - [Command Detection & Auto-Execution](#command-detection--auto-execution)
   - [Chat Mode](#chat-mode)
+- [Terminal Layout](#terminal-layout)
 - [Providers & Models](#providers--models)
   - [Ollama (Local)](#ollama-local)
   - [OpenRouter (Cloud)](#openrouter-cloud)
+  - [Saved Models](#saved-models)
   - [Switching Providers](#switching-providers)
+- [Security & Encryption](#security--encryption)
 - [Memory System](#memory-system)
 - [Anime Gacha System](#anime-gacha-system)
   - [/anime Command](#anime-command)
   - [/buddy Command](#buddy-command)
+- [Admin Vault](#admin-vault)
 - [File Output](#file-output)
 - [Project Structure](#project-structure)
 - [Configuration](#configuration)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
@@ -42,19 +50,24 @@
 
 | Feature | Description |
 |---|---|
-| 🧠 **Multi-Agent Orchestration** | Planner, Task Manager, Worker agents coordinate automatically |
+| 🧠 **Multi-Agent Orchestration** | Planner, Task Manager, Worker, Reviewer, and Editor agents coordinate automatically |
 | 🔀 **Intent Router** | Detects if you want to chat or build — no manual mode switching |
 | ⚡ **Parallel Wave Execution** | Tasks are grouped and executed concurrently where possible |
-| 🛡️ **Command Detection** | Shell commands are detected and shown to the user — never written to files |
-| 💬 **Streaming Chat** | Token-by-token streaming exactly like Claude's UI |
-| 🗂️ **Persistent Memory** | All sessions are logged to `memory.json` with automatic trimming |
-| 🔌 **Dual Provider Support** | Works with local Ollama models OR cloud OpenRouter models exclusively |
+| 🔍 **Self-Correction Loop** | Reviewer agent audits generated code; Editor agent patches issues automatically |
+| 🗂️ **Workspace Context Awareness** | Reads existing project files before planning to enable intelligent edits |
+| 🛡️ **AES-256 Encrypted Storage** | Memory and gacha state are encrypted at rest with file-level locking |
+| 🔐 **Admin Vault** | Password-protected admin panel for managing encrypted data |
+| 💬 **Streaming Chat** | Token-by-token streaming with 85/15 split-pane terminal layout |
+| 🗂️ **Persistent Memory** | Sessions logged to encrypted `.forge/memory.dat` with automatic trimming |
+| 🔌 **Dual Provider Support** | Works with local Ollama models OR cloud OpenRouter models |
+| 💾 **Saved Models** | Remembers previously used models for quick switching |
 | 📁 **Real File Generation** | Creates actual folders and source files in your `workspace/` directory |
-| 🚀 **Project Scaffolding** | `/create` command for React (Bun), Vite, Next.js, and Express |
+| 🚀 **Project Scaffolding** | `/create` command for Vanilla HTML, React (Bun), Vite, Next.js, and Express |
+| ⚡ **Auto Command Execution** | AI-suggested commands can be run automatically with user approval |
+| 📂 **Workspace Switching** | `/cd` command to switch active project context |
 | 🎮 **Anime Gacha System** | Daily loot boxes to unlock Anime character companions |
 | 🦊 **Dynamic Buddy Personas** | Your buddy companion alters the LLM's chat personality |
-| 🎨 **Dynamic ASCII Mascots** | Random mascot greets you each boot |
-| 🌐 **Model Support** | Works with any Ollama-installed model and any OpenRouter model ID |
+| 🎨 **Animated ASCII Mascots** | Persistent animated mascot in the right pane of a split terminal |
 
 ---
 
@@ -65,38 +78,46 @@ User Input
     │
     ▼
 ┌─────────────────────┐
-│   INTENT ROUTER     │  ── "chat" ──► Stream response directly
+│   INTENT ROUTER     │  ── "chat" ──► Stream response directly (85/15 split pane)
 └─────────────────────┘
     │ "build"
     ▼
 ┌─────────────────────┐
 │      PLANNER        │  ── Generates a TaskGraph (JSON) with dependencies
-└─────────────────────┘     (never generates command tasks — only file tasks)
+└─────────────────────┘     + Workspace context (existing files) injected
     │
     ▼
 ┌─────────────────────┐
-│    TASK MANAGER     │  ── Topological sort → Parallel Wave Schedule
+│    TASK MANAGER     │  ── Topological sort → Dynamic dependency-based scheduling
 └─────────────────────┘
     │
     ▼
 ┌─────────────────────────────────────┐
-│  WAVE EXECUTOR (Coordinator)        │
-│  Wave 1: [Task A] [Task B]  ──────► │  Concurrent LLM calls
-│  Wave 2: [Task C]           ──────► │  Sequential per wave
+│  DYNAMIC EXECUTOR (Coordinator)     │
+│  Tasks run as soon as deps resolve  │
+│  Concurrent LLM calls per wave      │
 └─────────────────────────────────────┘
     │
     ▼
 ┌──────────────────────────────┐
 │   WORKER AGENTS              │
 │   - Detect code vs commands  │
-│   - Write code to files      │
+│   - Edit existing files      │
+│   - Write code to workspace  │
 │   - Show commands to user    │
-│   - Save to workspace/       │
+└──────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────┐
+│   REVIEWER → EDITOR LOOP     │
+│   - Reviewer audits code     │
+│   - Editor patches issues    │
+│   - Up to 2 correction passes│
 └──────────────────────────────┘
     │
     ▼
 ┌─────────────────────┐
-│   MEMORY MANAGER    │  ── Logs full session (auto-trimmed at 100 entries)
+│   MEMORY MANAGER    │  ── AES-256 encrypted (auto-trimmed at 100 entries)
 └─────────────────────┘
 ```
 
@@ -142,12 +163,14 @@ You can type these commands at any prompt inside Forge:
 | Command | Action |
 |---|---|
 | `/help` | **Show all available commands** with descriptions |
-| `/model` | Switch LLM provider (Ollama / OpenRouter) and select a model |
-| `/create` | **Scaffold a new project** — React (Bun), Vite, Next.js, or Express |
+| `/model` | Switch LLM provider (Ollama / OpenRouter), select a model, or load a saved one |
+| `/create` | **Scaffold a new project** — Vanilla HTML, React (Bun), Vite, Next.js, or Express |
+| `/cd <folder>` | **Switch active workspace** to an existing project in `workspace/` |
 | `/anime` | Open the daily loot box or view your character collection |
 | `/buddy` | Set an active Anime character as your chat companion |
-| `/clear` | Clear the terminal screen |
+| `/clear` | Clear the terminal screen (full scrollback reset) |
 | `/memory` | Show memory stats (entries count, build/chat breakdown) |
+| `/admin` | **Access encrypted vault** (password required) |
 
 ### Natural Language
 Any other input is automatically analyzed by the **Intent Router**:
@@ -166,13 +189,13 @@ Every prompt is first passed to the **IntentRouter** (`src/agents/router.ts`). I
 { "intent": "chat" | "build" }
 ```
 
-- If `"chat"` → streams directly
+- If `"chat"` → streams directly in the 85/15 split pane
 - If `"build"` → hands off to the Coordinator pipeline
 - On LLM error → defaults to `"chat"` as a safe fallback
 
 ### The Build Pipeline
 
-**Step 1 — Planning**: The Planner (`src/agents/planner.ts`) reads your request plus your `memory.json` history. It generates a strict `TaskGraph` JSON:
+**Step 1 — Planning**: The Planner (`src/agents/planner.ts`) reads your request plus your encrypted `memory.dat` history, and if an active project exists, the planner receives the **full existing file tree** for context-aware planning. It generates a strict `TaskGraph` JSON:
 
 ```json
 {
@@ -187,18 +210,53 @@ Every prompt is first passed to the **IntentRouter** (`src/agents/router.ts`). I
 
 > **Important**: The planner is instructed to NEVER generate shell command tasks. Every task must produce a real source file.
 
-**Step 2 — Scheduling**: The Task Manager (`src/agents/taskManager.ts`) topologically sorts tasks into parallel waves:
+**Step 2 — Dynamic Scheduling**: The Task Manager (`src/agents/taskManager.ts`) uses dynamic dependency resolution — tasks are launched as soon as their dependencies complete, rather than waiting for an entire wave:
 ```
-Wave 1: task-1, task-3   (no dependencies → run in parallel)
-Wave 2: task-2           (depends on task-1 output)
+task-1, task-3 start immediately (no dependencies)
+task-2 starts as soon as task-1 completes
 ```
 
-**Step 3 — Execution**: Workers execute all tasks in a wave concurrently. Each worker:
+**Step 3 — Execution**: Workers execute tasks concurrently. Each worker:
 - Receives the task description + outputs of dependency tasks for context
 - Receives the full **directory manifest** (all files being created) so HTML workers correctly link CSS/JS via relative paths
+- **Reads existing files** from disk if they exist, enabling the LLM to edit rather than overwrite
 - Physically writes the generated code to `workspace/[projectName]/[fileOutput]`
+- Uses a **file queue** (`src/utils/fileQueue.ts`) to prevent race conditions during parallel writes
 
-### Command Detection
+### Self-Correction Loop (Reviewer + Editor)
+
+After each Worker produces code, the system runs a **Reviewer → Editor** quality loop:
+
+1. **Reviewer Agent** (`src/agents/reviewer.ts`) — Reads the generated code with line numbers and checks for:
+   - Placeholder text (e.g. `"TODO"`, `"Lorem Ipsum"`, `"Content goes here"`)
+   - Missing logical implementations required by the task
+   - Syntax errors or bad coding practices
+
+2. **Editor Agent** (`src/agents/editor.ts`) — If the Reviewer finds issues, the Editor receives precise line-range fix instructions and generates **surgical patches** (start/end line replacements). Patches are applied in reverse order to avoid line-number shifting.
+
+3. **Loop Limit** — The correction cycle runs up to **2 passes** to prevent infinite loops. If issues persist after 2 passes, the system logs a warning and moves on.
+
+```
+Worker produces code
+    │
+    ▼
+Reviewer evaluates ──► No issues? ──► ✓ Verified
+    │
+    ▼ (issues found)
+Editor patches code ──► Re-review (up to 2 passes)
+```
+
+### Workspace Context Awareness
+
+When an **active project** is set (via `/create` or `/cd`), the Coordinator:
+
+1. Reads the full directory tree of the existing project using `getDirectoryTree()` (from `src/utils/fs.ts`)
+2. Injects the file list into the Planner's prompt with the instruction: *"Edit the existing files instead of creating new ones"*
+3. For each task, if the target file already exists on disk, its current content is read and passed to the Worker so the LLM can produce an intelligent edit instead of a blind overwrite
+
+This enables iterative development — you can say *"add authentication to my Express server"* and Forge will modify existing files rather than recreating them.
+
+### Command Detection & Auto-Execution
 
 Workers include a **command detection system** that prevents shell commands from being written to files:
 
@@ -206,28 +264,43 @@ Workers include a **command detection system** that prevents shell commands from
 - Commands are **collected and displayed** to the user at the end of the build:
 
 ```
-📋 Commands to run manually:
+📋 Commands suggested by AI:
 ┌─────────────────────────────────────────
 │  $ npm install express body-parser cors
 │  $ npm run dev
 └─────────────────────────────────────────
-Copy and run these commands in your project directory.
 ```
 
-- This ensures generated files always contain valid source code, not shell commands.
+- The user is then prompted: **"Would you like to run these commands automatically?"**
+- If confirmed, Forge executes them sequentially in the project directory using `execSync`.
 
 ### Chat Mode
 
-When intent is `chat`, Forge streams responses token by token using `async *` generator functions:
+When intent is `chat`, Forge streams responses token by token in an 85/15 split-pane layout:
 
 ```
-●  Thinking...    ← spinner while waiting for first token
-┌─────────────────────────────
-│ Hello! I'm [BuddyName]...   ← text streams in live
-└─────────────────────────────
+┌──────────────────────────────────────────────────────────┐│
+│ Hello! I'm your AI assistant. How can I help you today?  ││  /\_/\
+│ I can help you with coding, debugging, or building       ││ ( o.o )
+│ entire projects from scratch...                          ││  > ^ <
+└──────────────────────────────────────────────────────────┘│
 ```
 
-Chat responses are also saved to `memory.json` so the AI accumulates context over time.
+Chat responses are saved to encrypted `memory.dat` so the AI accumulates context over time.
+
+---
+
+## Terminal Layout
+
+Forge uses an **85/15 split-pane layout**:
+
+| Left Pane (85%) | Right Pane (15%) |
+|---|---|
+| Chat responses, build output, prompts | Animated ASCII mascot |
+
+- The right pane displays a persistent **animated mascot** (Snowman, Dog, Robot, or your active Buddy) that cycles through animation frames at 500ms intervals
+- The divider line is drawn using ANSI escape sequences for clean positioning
+- The mascot is positioned at the bottom-right corner to avoid interfering with scrolling content
 
 ---
 
@@ -265,27 +338,51 @@ deepseek/deepseek-r1              # Reasoning model with think tokens
 meta-llama/llama-3.1-70b-instruct # Open source powerhouse
 ```
 
-### Switching Providers
+### Saved Models
 
-Type `/model` at any time during your session:
+Forge **remembers every model you've used**. When you type `/model`, previously configured models appear at the top of the selection menu for instant switching:
 
 ```
 ◆ Select LLM Provider
-│  ○  Ollama (Local)
-│  ●  OpenRouter (Cloud)
-└
-
-◆ Enter OpenRouter model name
-│  openai/gpt-4o
+│  ○  💾 openrouter (openai/gpt-4o)
+│  ○  💾 ollama (qwen2.5-coder:7b)
+│  ○  ❌ Delete a Saved Model
+│  ○  Ollama (New)
+│  ○  OpenRouter (New)
 ```
+
+Saved models are persisted in `workspace/saved_models.json`.
+
+### Switching Providers
+
+Type `/model` at any time during your session to switch providers, select a saved model, or configure a new one.
 
 > **Note:** Forge uses *one* provider exclusively per session. There is no automatic fallback mixing. This prevents unpredictable behavior from mixing local and cloud models.
 
 ---
 
+## Security & Encryption
+
+Forge encrypts all persistent user data at rest using **AES-256-CBC** encryption:
+
+| Data | Storage Path | Format |
+|---|---|---|
+| Session memory | `.forge/memory.dat` | Encrypted binary |
+| Gacha state | `.forge/gacha.dat` | Encrypted binary |
+
+**How it works:**
+- Encryption uses `aes-256-cbc` with a key derived via `scryptSync` (PBKDF)
+- Each write generates a random **16-byte IV** prepended to the ciphertext
+- Files are **locked to read-only** (`chmod 444`) after every write to prevent tampering
+- Files are temporarily unlocked (`chmod 666`) only during write operations
+
+> **Note:** The `.forge/` directory is automatically created on first run and should be added to `.gitignore`.
+
+---
+
 ## Memory System
 
-Every interaction is persisted to `memory.json`:
+Every interaction is persisted to `.forge/memory.dat` (AES-256 encrypted):
 
 ```json
 [
@@ -322,14 +419,14 @@ Type `/anime` to access the loot box system:
 │  ○  Cancel
 ```
 
-**Open Daily Box:** Unlocks a random Anime character. **Strictly one box per 24 hours.** The timestamp is saved to `gacha.json`. If you try again too soon:
+**Open Daily Box:** Unlocks a random Anime character. **Strictly one box per 24 hours.** The timestamp is saved to `.forge/gacha.dat` (encrypted). If you try again too soon:
 
 ```
 ⚠  You must wait 22h 13m before opening another box!
 ```
 
 **The Roster (28 characters):**
-Naruto, Sasuke, Kakashi, Goku, Vegeta, Gohan, Saitama, Genos, Eren, Levi, Mikasa, Gojo, Yuji, Megumi, Luffy, Zoro, Sanji, Gon, Killua, Hisoka, Tanjiro, Nezuko, Zenitsu, Light Yagami, L, Deku, Bakugo, Todoroki
+Naruto Uzumaki, Sasuke Uchiha, Kakashi Hatake, Goku, Vegeta, Gohan, Saitama, Genos, Eren Yeager, Levi Ackerman, Mikasa Ackerman, Satoru Gojo, Yuji Itadori, Megumi Fushiguro, Monkey D. Luffy, Roronoa Zoro, Sanji, Gon Freecss, Killua Zoldyck, Hisoka, Tanjiro Kamado, Nezuko Kamado, Zenitsu Agatsuma, Light Yagami, L Lawliet, Izuku Midoriya, Katsuki Bakugo, Shoto Todoroki
 
 ### /buddy Command
 
@@ -345,7 +442,29 @@ After unlocking characters, set one as your active chat companion:
 Once a buddy is active, the chat system prompt transforms. Say `hi` and the AI will respond as them:
 > *"Tch. Don't waste my time with greetings. What do you need?"* — **Levi Ackerman**
 
-State is persisted in `gacha.json` across sessions.
+The active buddy also appears as the **animated mascot** in the right pane. State is persisted in encrypted `.forge/gacha.dat` across sessions.
+
+---
+
+## Admin Vault
+
+Type `/admin` to access the password-protected admin panel:
+
+```
+◆ Enter Admin Password:
+│  ********
+```
+
+The default password is `admin123` (configurable via `ADMIN_PASSWORD` environment variable).
+
+**Admin Options:**
+
+| Option | Description |
+|---|---|
+| Read Encrypted Memory | Decrypt and display all stored session memories |
+| Clear Encrypted Memory | Permanently wipe all memories (re-encrypts empty state) |
+| Read Encrypted Gacha State | Decrypt and display gacha progress |
+| Reset Gacha State | Wipe all unlocked characters and reset the timer |
 
 ---
 
@@ -381,26 +500,37 @@ The AI is explicitly instructed to use relative paths when linking files:
 FORGECLI/
 ├── src/
 │   ├── index.ts              # CLI entry point & REPL loop
-│   ├── types.ts              # TypeScript interfaces
+│   ├── types.ts              # TypeScript interfaces (Task, ProviderConfig, etc.)
 │   ├── agents/
-│   │   ├── coordinator.ts    # Orchestrates the full pipeline
+│   │   ├── coordinator.ts    # Orchestrates the full pipeline + self-correction loop
 │   │   ├── planner.ts        # Decomposes requests into TaskGraph
-│   │   ├── taskManager.ts    # Topological sort → wave scheduling
+│   │   ├── taskManager.ts    # Dynamic dependency-based scheduling
 │   │   ├── worker.ts         # Executes tasks, detects commands, writes files
-│   │   └── router.ts         # Intent detection + chat streaming
+│   │   ├── router.ts         # Intent detection + chat streaming
+│   │   ├── reviewer.ts       # Code quality auditor (placeholder/syntax detection)
+│   │   └── editor.ts         # Precision code patcher (line-level edits)
 │   ├── llm/
 │   │   ├── ollama.ts         # Ollama client (local models)
-│   │   └── openrouter.ts     # OpenRouter client (cloud models)
+│   │   └── openrouter.ts     # OpenRouter client (cloud models, streaming)
 │   └── utils/
-│       ├── ui.ts             # ASCII mascots, Forge logo, terminal utils
-│       ├── memory.ts         # Persistent session memory (memory.json)
-│       └── gacha.ts          # Anime loot box & buddy system
+│       ├── ui.ts             # ASCII mascots, split-pane layout, terminal utils
+│       ├── memory.ts         # Encrypted persistent memory (.forge/memory.dat)
+│       ├── gacha.ts          # Encrypted gacha system (.forge/gacha.dat)
+│       ├── crypto.ts         # AES-256-CBC encryption/decryption
+│       ├── fs.ts             # Directory tree reader (workspace context)
+│       ├── fileQueue.ts      # Thread-safe file write queue
+│       └── prompt.ts         # Autocomplete text input utility
+├── .forge/                   # Encrypted data directory (auto-created)
+│   ├── memory.dat            # AES-256 encrypted session memory
+│   └── gacha.dat             # AES-256 encrypted gacha state
 ├── workspace/                # All generated projects land here
-├── memory.json               # Session history (auto-created, auto-trimmed)
-├── gacha.json                # Gacha progress (auto-created)
-├── .env                      # API keys
+├── .env                      # API keys (OPENROUTER_API_KEY, ADMIN_PASSWORD)
+├── .gitignore
 ├── package.json
-└── tsconfig.json
+├── tsconfig.json
+├── LICENSE.md
+├── CONTRIBUTING.md
+└── SECURITY.md
 ```
 
 ---
@@ -411,6 +541,7 @@ FORGECLI/
 
 ```env
 OPENROUTER_API_KEY=sk-or-...
+ADMIN_PASSWORD=your_admin_password    # Optional, defaults to "admin123"
 ```
 
 ### TypeScript Config
@@ -443,11 +574,24 @@ npm start       # Run compiled output
 |---|---|
 | `fetch failed` on any prompt | Ensure `ollama serve` is running if using Ollama |
 | `Invalid API Key` | Check your `OPENROUTER_API_KEY` in `.env` |
+| `OPENROUTER_API_KEY missing` | Create a `.env` file with your key |
 | Files written to wrong directory | Ensure you run `npm run dev` from the `FORGECLI/` directory |
 | Intent always routes to BUILD | The 1.5b model sometimes fails — try a larger model via `/model` |
 | Commands written to files | Fixed — commands are now detected and shown, not written |
 | `/create` fails with Bun | Ensure Bun is installed: `curl -fsSL https://bun.sh/install \| bash` |
+| Encrypted data corrupted | Use `/admin` → Clear/Reset to re-initialize encrypted state |
+| Mascot rendering artifacts | Resize your terminal to at least 80 columns wide |
 
 ---
 
-*Built with Node.js, TypeScript, @clack/prompts, chalk, Ollama SDK, and OpenAI SDK.*
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## License
+
+See [LICENSE.md](LICENSE.md) for details.
+
+---
+
+*Built with Node.js, TypeScript, @clack/prompts, chalk, log-update, Ollama SDK, OpenAI SDK, and native Node.js crypto.*
