@@ -19,9 +19,9 @@ export interface AutocompleteTextOptions {
 
 export const autocompleteText = async (opts: AutocompleteTextOptions): Promise<string | symbol> => {
 
-   return prompt.text({
-      message: opts.message,
-      placeholder: opts.placeholder,
-      initialValue: opts.initialValue
-   });
+  return prompt.text({
+    message: opts.message,
+    placeholder: opts.placeholder,
+    initialValue: opts.initialValue
+  });
 };

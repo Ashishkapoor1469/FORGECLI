@@ -40,6 +40,7 @@ function showHelp() {
     { cmd: "/clear", desc: "Clear the terminal screen" },
     { cmd: "/memory", desc: "Show memory stats (entries count, file size)" },
     { cmd: "/admin", desc: "Access encrypted vault (Password required)" },
+    { cmd: "/cd", desc: "Change Directory AI work on that directory" },
   ];
 
   for (const { cmd, desc } of commands) {
