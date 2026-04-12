@@ -173,9 +173,12 @@ function resolveRelativePath(fromDir: string, ref: string): string {
   // Clean up ./ prefix
   const cleanRef = ref.replace(/^\.\//, '');
 
+  // Normalize '.' to empty (root-level files)
+  const normDir = (fromDir === '.') ? '' : fromDir;
+
   if (ref.startsWith('../')) {
     // Navigate up
-    const parts = fromDir.split('/');
+    const parts = normDir.split('/');
     const refParts = ref.split('/');
     let upCount = 0;
     for (const part of refParts) {
@@ -187,8 +190,9 @@ function resolveRelativePath(fromDir: string, ref: string): string {
     return base ? `${base}/${rest}` : rest;
   }
 
-  return fromDir ? `${fromDir}/${cleanRef}` : cleanRef;
+  return normDir ? `${normDir}/${cleanRef}` : cleanRef;
 }
+
 
 // Find the line number containing a substring.
 function findLineNumber(lines: string[], substring: string): number {

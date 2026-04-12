@@ -130,7 +130,11 @@ CRITICAL RULES:
 3. Do NOT output shell commands like "npm install", "mkdir", "cd", etc.
 4. Do NOT output conversational text, explanations, or 'obj' structures.
 5. If the task is about setting up dependencies, output a valid package.json file with the dependencies listed.
-6. Generate REAL, COMPLETE, WORKING code — not placeholders or stubs.`;
+6. Generate REAL, COMPLETE, WORKING code — not placeholders or stubs.
+7. 🔥 EXPORT & IMPORT RULE: Ensure perfect precision with module exports and imports. Verify correct file extensions, precise module names, and exactly match components against context!
+8. 🔥 UI/FRONTEND RULE: If writing HTML/React/Vue/etc, apply modern, beautiful UI aesthetics (responsive layouts, proper padding, glass effects). Make sure CSS files/frameworks are correctly imported.
+9. 🧩 REACT/NEXTJS COMPONENTS: When building components, use modern functional components, standard hooks, and ALWAYS export them properly. Ensure robust prop definitions and error-free code.
+10. 🗃️ CATALOG AWARENESS: Your dependency context contains 'componentMetadata'. Strictly match their specific export signatures, hooks, and usages to seamlessly interconnect without mismatches!`;
 
     try {
       let result: string;

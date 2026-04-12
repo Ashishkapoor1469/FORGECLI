@@ -16,7 +16,7 @@ process.removeAllListeners("SIGTERM");
 
 let config: ProviderConfig = {
   provider: "ollama",
-  model: "qwen2.5-coder:1.5b",
+  model: "glm-5:cloud",
 };
 
 const coordinator = new Coordinator();
@@ -59,18 +59,18 @@ async function handleModelSelection() {
   if (existsSync(savedModelsPath)) {
     try {
       savedModels = JSON.parse(readFileSync(savedModelsPath, "utf-8"));
-    } catch {}
+    } catch { }
   }
 
   const options: any[] = [];
-  
+
   if (savedModels.length > 0) {
     savedModels.forEach((m, i) => {
-       options.push({ value: `saved:${i}`, label: `💾 ${m.provider} (${m.model})` });
+      options.push({ value: `saved:${i}`, label: `💾 ${m.provider} (${m.model})` });
     });
     options.push({ value: "delete", label: "❌ Delete a Saved Model" });
   }
-  
+
   options.push({ value: "ollama", label: "Ollama (New)" });
   options.push({ value: "openrouter", label: "OpenRouter (New)" });
 
@@ -106,9 +106,9 @@ async function handleModelSelection() {
   }
 
   if (typeof selection === "string" && selection.startsWith("saved:")) {
-     const idx = parseInt(selection.split(":")[1]);
-     provider = savedModels[idx].provider;
-     modelStr = savedModels[idx].model;
+    const idx = parseInt(selection.split(":")[1]);
+    provider = savedModels[idx].provider;
+    modelStr = savedModels[idx].model;
   } else {
     provider = selection as string;
     if (provider === "ollama") {
@@ -132,7 +132,7 @@ async function handleModelSelection() {
     if (!exists) {
       savedModels.push({ provider, model: modelStr });
       if (!existsSync(join(process.cwd(), "workspace"))) {
-         mkdirSync(join(process.cwd(), "workspace"));
+        mkdirSync(join(process.cwd(), "workspace"));
       }
       writeFileSync(savedModelsPath, JSON.stringify(savedModels, null, 2), "utf-8");
     }
@@ -416,7 +416,7 @@ async function handleAdminMenu() {
   });
 
   if (prompt.isCancel(pass)) return;
-  
+
   const expectedPass = process.env.ADMIN_PASSWORD || "admin123";
   if (pass !== expectedPass) {
     prompt.log.error("Incorrect password! Access denied.");
@@ -473,6 +473,17 @@ async function main() {
     `Model: ${chalk.cyan(`${config.provider}/${config.model}`)}${workspaceStr}${buddyStr} | Type ${chalk.bold("/help")} for commands`,
   );
 
+  // Fallback for non-interactive / direct execution
+  const cliArgs = process.argv.slice(2).join(" ").trim();
+  if (cliArgs) {
+    prompt.log.info(`Executing direct command: ${chalk.green(cliArgs)}`);
+    const buildSpinner = prompt.spinner();
+    buildSpinner.start("Initializing coordinator...");
+    await coordinator.processRequest(cliArgs, buildSpinner, config);
+    buildSpinner.stop("Build completed.");
+    process.exit(0);
+  }
+
   while (true) {
     const userReq = await autocompleteText({
       message: "forge ›",
@@ -527,7 +538,7 @@ async function main() {
       }
       continue;
     }
-    
+
     if (input === "/clear") {
       process.stdout.write('\x1Bc'); // Full terminal reset (wipes scrollback buffer)
       showIntro();

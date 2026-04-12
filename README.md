@@ -26,6 +26,7 @@
   - [Workspace Context Awareness](#workspace-context-awareness)
   - [Command Detection & Auto-Execution](#command-detection--auto-execution)
   - [Chat Mode](#chat-mode)
+  - [Execution Log Box](#execution-log-box)
 - [Advanced Features](#advanced-features)
   - [Smart Memory Filtering](#smart-memory-filtering)
   - [Resume & Continue Builds](#resume--continue-builds)
@@ -36,6 +37,8 @@
   - [Failure Recovery System](#failure-recovery-system)
   - [Task Validation](#task-validation)
   - [Output Consistency Checking](#output-consistency-checking)
+  - [Encrypted Component Registry](#encrypted-component-registry)
+  - [Cross-Agent Context Sharing](#cross-agent-context-sharing)
 - [Terminal Layout](#terminal-layout)
 - [Providers & Models](#providers--models)
   - [Ollama (Local)](#ollama-local)
@@ -65,7 +68,7 @@
 | ⚡ **Parallel Wave Execution** | Tasks are grouped and executed concurrently where possible |
 | 🔍 **Self-Correction Loop** | Reviewer agent audits generated code; Editor agent patches issues automatically |
 | 🗂️ **Workspace Context Awareness** | Reads existing project files before planning to enable intelligent edits |
-| 🛡️ **AES-256 Encrypted Storage** | Memory and gacha state are encrypted at rest with file-level locking |
+| 🛡️ **AES-256 Encrypted Storage** | Memory, gacha state, and component registries encrypted at rest |
 | 🔐 **Admin Vault** | Password-protected admin panel for managing encrypted data |
 | 💬 **Streaming Chat** | Token-by-token streaming with 85/15 split-pane terminal layout |
 | 🗂️ **Persistent Memory** | Sessions logged to encrypted `.forge/memory.dat` with automatic trimming |
@@ -87,6 +90,9 @@
 | 🩹 **Failure Recovery** | Retries failed tasks once with error context, then logs failures and continues |
 | ✅ **Task Validation** | Pre-execution graph validation: rejects vague tasks, detects circular deps, warns on file conflicts |
 | 🔗 **Output Consistency** | Post-build cross-file reference checking: validates HTML links, JS imports, and suggests fixes |
+| 📋 **Execution Log Box** | Claude-style bordered chat panel with fixed frame and scrolling log content |
+| 🗃️ **Component Registry** | AES-256 encrypted catalog tracking every generated component with metadata |
+| 🔗 **Cross-Agent Context** | Decoded component registry is injected into Planner and Worker prompts for perfect module linking |
 
 ---
 
@@ -154,6 +160,7 @@ User Input
     ▼
 ┌──────────────────────────────┐
 │   POST-EXECUTION             │
+│   - Component registry save  │  ── AES-256 encrypted component catalog
 │   - Consistency checker      │  ── Validate HTML/JS cross-file references
 │   - Failure report           │  ── List failed tasks + fix suggestions
 │   - Memory save (filtered)   │  ── AES-256 encrypted (auto-trimmed at 100)
@@ -328,6 +335,30 @@ When intent is `chat`, Forge streams responses token by token in an 85/15 split-
 
 Chat responses are saved to encrypted `memory.dat` so the AI accumulates context over time.
 
+### Execution Log Box
+
+During multi-agent builds, Forge renders a **Claude-style bordered chat box** in the bottom ~38% of the terminal. The box has a fixed frame with Unicode borders — only the content scrolls upward as new task logs arrive:
+
+```
+  ┌─── ⚡ Forge Execution Log ─────────────────────────────────────────┐
+  │  ✓ task-1: Code verified as correct.                               │
+  │  🔍 task-2: Reviewing generated code...                            │
+  │  ✓ task-2: Code verified as correct.                               │
+  │  ⚠ task-3: Issues found (Attempt 1/2). Editing...                  │
+  │    Fix needed: Missing React import                                │
+  │  ✓ task-3: Code verified as correct.                               │
+  │  ✓ task-4: Done                                                    │
+  │                                                                    │
+  └────────────────────────────────────────────────────────────────────┘
+```
+
+**Behavior:**
+- The box frame (`┌─┐│└─┘`) stays fixed in place — it never scrolls or shifts
+- New log lines appear at the bottom; old lines scroll upward
+- Long lines are smart-truncated (preserving ANSI color codes) with an `…` ellipsis
+- The mascot animation is paused during execution to prevent ANSI write collisions
+- After execution completes, the box is cleared and normal terminal output resumes
+
 ---
 
 ## Advanced Features
@@ -476,30 +507,78 @@ After all tasks complete, the **Consistency Checker** (`src/utils/consistencyChe
 
 - **HTML files** — Checks `<link href="...">` and `<script src="...">` tags point to files that actually exist in the project
 - **JS/TS files** — Checks `import ... from '...'` and `require('...')` resolve to real modules
+- **Root-level paths** — Correctly resolves `./styles.css` for root-level HTML files (normalizes `.` directory to empty)
 - **Suggestions** — If a broken reference is found, suggests the closest matching file:
 
 ```
 🔗 Consistency Check — Broken References:
-  • index.html:8 → styles.csss
-    Did you mean "css/styles.css"?
   • src/app.js:3 → ./uitls/helpers
     Did you mean "src/utils/helpers.js"?
-  Checked 6 files, 4 clean.
+  Checked 6 files, 5 clean.
 ```
+
+### Encrypted Component Registry
+
+Every successfully generated component is tracked in an **AES-256-CBC encrypted catalog** at `workspace/<project>/.forge/components.enc`.
+
+The **Component Registry** (`src/utils/registry.ts`) stores:
+
+| Field | Description |
+|---|---|
+| `id` | Task ID or UUID |
+| `projectName` | Parent project name |
+| `filePath` | Relative path to the generated file |
+| `description` | Task description from the planner |
+| `createdAt` | ISO timestamp of creation |
+
+**How it works:**
+- Encryption key derived from `ADMIN_PASSWORD` env var (or a default session key) via SHA-256
+- Each write generates a random **16-byte IV** prepended to the ciphertext
+- Upsert logic: re-generating a file updates the existing record instead of duplicating
+- The catalog is automatically decrypted and injected into Planner/Worker context on the next build
+
+```
+workspace/
+└── react-todo-app/
+    ├── .forge/
+    │   └── components.enc    ← AES-256 encrypted JSON catalog
+    ├── src/
+    │   └── components/
+    │       └── ui/
+    │           └── Button.tsx
+    └── package.json
+```
+
+### Cross-Agent Context Sharing
+
+To ensure agents understand what previous steps built, Forge injects decoded component metadata at two levels:
+
+**Planner Level** — The decrypted component registry is appended to `workspaceContext` as `COMPONENT REGISTRY METADATA`. The Planner uses **Rule 14 (Catalog Awareness)** to avoid recreating existing components and correctly reference them in new task dependencies.
+
+**Worker Level** — Each Worker's dependency context map is enriched with `componentMetadata` from the registry. The Worker uses **Rule 10 (Catalog Awareness)** to match exact export signatures, hooks, and prop types from previously generated components.
+
+This prevents the common multi-agent failure of:
+- Generating a `Button` component in task-3, then importing it incorrectly in task-7
+- Creating duplicate components because the Planner didn't know one already existed
+- Import/export signature mismatches between dependent tasks
 
 ---
 
 ## Terminal Layout
 
-Forge uses an **85/15 split-pane layout**:
+Forge uses an **85/15 split-pane layout** with a dedicated execution log panel:
 
-| Left Pane (85%) | Right Pane (15%) |
-|---|---|
-| Chat responses, build output, prompts | Animated ASCII mascot |
+| Area | Location | Content |
+|---|---|---|
+| **Main Pane** | Left 85% | Chat responses, build output, Clack prompts |
+| **Mascot Pane** | Right 15% | Animated ASCII mascot (paused during builds) |
+| **Execution Log Box** | Bottom ~38% | Claude-style bordered chat box for task logs |
 
 - The right pane displays a persistent **animated mascot** (Snowman, Dog, Robot, or your active Buddy) that cycles through animation frames at 500ms intervals
 - The divider line is drawn using ANSI escape sequences for clean positioning
 - The mascot is positioned at the bottom-right corner to avoid interfering with scrolling content
+- **During builds:** The mascot is paused and the Execution Log Box takes over the bottom portion. All task status, review, and error logs render inside the bordered box with fixed frame and scrolling content
+- **After builds:** The box is cleared and the mascot resumes
 
 ---
 
@@ -568,6 +647,7 @@ Forge encrypts all persistent user data at rest using **AES-256-CBC** encryption
 |---|---|---|
 | Session memory | `.forge/memory.dat` | Encrypted binary |
 | Gacha state | `.forge/gacha.dat` | Encrypted binary |
+| Component registry | `workspace/<project>/.forge/components.enc` | AES-256-CBC encrypted JSON |
 
 **How it works:**
 - Encryption uses `aes-256-cbc` with a key derived via `scryptSync` (PBKDF)
@@ -726,6 +806,7 @@ FORGECLI/
 │   └── utils/
 │       ├── ui.ts             # ASCII mascots, split-pane layout, terminal utils
 │       ├── memory.ts         # Encrypted memory (+ smart filtering, resume detection)
+│       ├── registry.ts       # AES-256 encrypted component catalog (per-project)
 │       ├── semanticAnalyzer.ts # Project structure analysis (tech, routes, components)
 │       ├── consistencyChecker.ts # Post-build cross-file reference validation
 │       ├── gacha.ts          # Encrypted gacha system (.forge/gacha.dat)
@@ -811,4 +892,4 @@ See [LICENSE.md](LICENSE.md) for details.
 
 ---
 
-*Built with Node.js, TypeScript, @clack/prompts, chalk, log-update, Ollama SDK, OpenAI SDK, and native Node.js crypto.*
+*Built with Node.js, TypeScript, @clack/prompts, chalk, Ollama SDK, OpenAI SDK, and native Node.js crypto.*

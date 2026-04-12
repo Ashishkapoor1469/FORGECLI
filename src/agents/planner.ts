@@ -42,6 +42,12 @@ CRITICAL RULES:
 6. Use a descriptive, kebab-case projectName (e.g., "express-api-server", "react-todo-app"). If EXISTING PROJECT ARCHITECTURE is provided, use that project's existing name!
 7. Keep tasks atomic — one file per task.
 8. Every task MUST have a clear, specific description (not vague like "setup project" or "initialize").
+9. 🔥 UI/FRONTEND RULE: When planning web applications, explicitly include tasks for styling (CSS files, Tailwind config, etc) and order them correctly. Ensure component tasks state they MUST use the styling system and look beautiful.
+10. 🔥 DEPENDENCY RULE: If generating both HTML and CSS, the CSS task MUST depend on the HTML task so it can read the exact class names. Do NOT run them in parallel.
+11. 🔥 MODULE CONNECTION RULE: If a file imports another file (like a React component importing a Button or CSS module), the importing task MUST depend on the imported task.
+12. 🧩 COMPONENT BUILDER MODE: If the user asks to build UI components for frameworks like React or Next.js, ALWAYS output them in a 'components/ui/' or 'src/components/ui/' folder architecture.
+13. 🗑️ DELETED FILES: If the user or context indicates a file was deleted manually, DO NOT recreate it. Only edit the remaining active files.
+14. 🗃️ CATALOG AWARENESS: Review the COMPONENT REGISTRY METADATA provided in workspace context. If an architecture is already listed, DO NOT create redundant tasks to rebuild it, but DO reference it in new module dependencies.
 
 Context from previous iterations:
 ${memorySummary}

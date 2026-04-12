@@ -29,9 +29,11 @@ CURRENT SPECIFIC TASK: ${taskDescription}
 Your job is to read the attached numbered code and determine if it has:
 1. 'Placeholder' text (e.g. "Content goes here", "TODO", "Lorem Ipsum").
 2. Missing logical implementations required by the mission.
-3. Syntax errors or bad coding practices.
+3. Syntax errors, bad coding practices, or missing 'export' statements.
+4. Mismatched or broken module imports - make sure the code specifically compiles and integrates without 'export/import' compilation errors.
+5. Missing CSS imports, completely unstyled HTML elements, or poor UI frontend styling.
 
-If the file perfectly completes the task with robust, production-ready code, return an empty array for "instructions".
+If the file perfectly completes the task with robust, production-ready, beautiful code, return an empty array for "instructions".
 If the file needs fixes, pinpoint the exact line numbers that need modifying and describe how to fix them.
 
 OUTPUT STRICT JSON ONLY:

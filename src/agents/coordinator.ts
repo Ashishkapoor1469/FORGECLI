@@ -16,6 +16,8 @@ import { join } from 'path';
 
 import { getDirectoryTree } from '../utils/fs.js';
 import * as fs from 'fs';
+import { ComponentRegistry } from '../utils/registry.js';
+import { stopGlobalMascot, startGlobalMascot } from '../utils/ui.js';
 
 export class Coordinator {
   private planner = new Planner();
@@ -24,6 +26,127 @@ export class Coordinator {
   private reviewer = new ReviewerAgent();
   private editor = new EditorAgent();
   private memory = new MemoryManager();
+  private registry = new ComponentRegistry();
+  // ─── Chat-box log state ───
+  private allLogs: string[] = [];
+  private boxTop: number = 0;
+  private boxHeight: number = 0;
+  private boxWidth: number = 0;
+
+  /** Strip ANSI escape codes for length calculation */
+  private ansiStrip(s: string): string {
+    return s.replace(/\x1B\[[0-9;]*m/g, '');
+  }
+
+  /**
+   * Initialize the Claude-style bordered log box in the bottom ~38% of terminal.
+   *
+   *  ┌─── ⚡ Forge Execution Log ────────────────────────────────┐
+   *  │  ✓ task-1: Code verified as correct.              │
+   *  │  🔍 task-2: Reviewing generated code...             │
+   *  │                                                     │
+   *  └─────────────────────────────────────────────────────┘
+   */
+  private initLogBox() {
+    const rows = process.stdout.rows || 24;
+    const cols = process.stdout.columns || 80;
+
+    this.boxHeight = Math.max(7, Math.floor(rows * 0.38));
+    this.boxWidth = Math.max(40, cols - 4);
+    this.boxTop = rows - this.boxHeight;
+
+    // Push existing content up to make room for the box
+    process.stdout.write('\n'.repeat(this.boxHeight));
+
+    this.drawFrame();
+  }
+
+  /** Draw the box border frame */
+  private drawFrame() {
+    const innerW = this.boxWidth - 2;
+    const title = ' ⚡ Forge Execution Log ';
+    const topRight = '─'.repeat(Math.max(0, innerW - title.length - 3));
+    const topLine = '  ' + chalk.dim('┌───') + chalk.bold.hex('#74B9FF')(title) + chalk.dim(topRight + '┐');
+    const botLine = '  ' + chalk.dim('└' + '─'.repeat(innerW) + '┘');
+
+    let out = '\x1b[s';
+
+    // Top border
+    out += `\x1b[${this.boxTop};1H\x1b[2K${topLine}`;
+
+    // Empty content rows
+    for (let r = 1; r < this.boxHeight - 1; r++) {
+      out += `\x1b[${this.boxTop + r};1H\x1b[2K  ${chalk.dim('│')}${' '.repeat(innerW)}${chalk.dim('│')}`;
+    }
+
+    // Bottom border
+    out += `\x1b[${this.boxTop + this.boxHeight - 1};1H\x1b[2K${botLine}`;
+
+    out += '\x1b[u';
+    process.stdout.write(out);
+  }
+
+  /**
+   * Push a log line into the chat box. Old lines scroll up, new lines
+   * appear at the bottom. The frame stays fixed.
+   */
+  private pushLog(msg: string) {
+    this.allLogs.push(msg);
+
+    const innerW = this.boxWidth - 2;
+    const visibleRows = this.boxHeight - 2; // exclude top + bottom border
+    const maxContentW = innerW - 2; // 1-char padding inside each │
+
+    // Show only the most recent lines that fit
+    const visible = this.allLogs.slice(-visibleRows);
+
+    let out = '\x1b[s';
+
+    for (let i = 0; i < visibleRows; i++) {
+      const row = this.boxTop + 1 + i;
+      const raw = visible[i] || '';
+      const plainLen = this.ansiStrip(raw).length;
+
+      let display = raw;
+      if (plainLen > maxContentW) {
+        // Smart truncation preserving ANSI codes
+        let visCount = 0;
+        let cutIdx = 0;
+        for (let c = 0; c < display.length; c++) {
+          if (display[c] === '\x1b') {
+            const end = display.indexOf('m', c);
+            if (end !== -1) { c = end; continue; }
+          }
+          visCount++;
+          if (visCount >= maxContentW - 1) { cutIdx = c + 1; break; }
+        }
+        display = display.substring(0, cutIdx) + chalk.dim('…');
+      }
+
+      const padLen = Math.max(0, maxContentW - this.ansiStrip(display).length);
+      out += `\x1b[${row};1H  ${chalk.dim('│')} ${display}${' '.repeat(padLen)} ${chalk.dim('│')}`;
+    }
+
+    out += '\x1b[u';
+    process.stdout.write(out);
+  }
+
+  /**
+   * Clear the log box and restore terminal for normal clack output.
+   */
+  private stopLogBox() {
+    if (this.boxTop <= 0) return;
+
+    let out = '\x1b[s';
+    for (let r = this.boxTop; r < this.boxTop + this.boxHeight; r++) {
+      out += `\x1b[${r};1H\x1b[2K`;
+    }
+    out += `\x1b[${this.boxTop};1H`;
+    process.stdout.write(out);
+
+    this.allLogs = [];
+    this.boxTop = 0;
+  }
 
   async processRequest(request: string, spinner: any, config: ProviderConfig): Promise<void> {
     // Reset state for each new request to avoid stale data
@@ -61,7 +184,7 @@ export class Coordinator {
         }
         console.log(`  From: ${chalk.dim(resumable.timestamp)}`);
 
-        const shouldResume = await prompt.confirm({
+        const shouldResume = !process.stdout.isTTY ? true : await prompt.confirm({
           message: `Resume from last build? (Skip ${resumable.completedTasks.length} completed tasks)`,
           initialValue: true,
         });
@@ -99,7 +222,9 @@ export class Coordinator {
        const projectPath = join(process.cwd(), "workspace", config.activeProject);
        if (fs.existsSync(projectPath)) {
          const fileTree = getDirectoryTree(projectPath);
-         workspaceContext = `EXISTING PROJECT ARCHITECTURE:\n${JSON.stringify(fileTree, null, 2)}\nIMPORTANT: Edit the existing files instead of creating new ones if they already exist to achieve the goal.\n`;
+         const comps = this.registry.getDecryptedRegistry(config.activeProject);
+         const registryContext = comps.length > 0 ? `\nCOMPONENT REGISTRY METADATA:\n${JSON.stringify(comps, null, 2)}\n` : "";
+         workspaceContext = `EXISTING PROJECT ARCHITECTURE:\n${JSON.stringify(fileTree, null, 2)}\n${registryContext}\nIMPORTANT: Edit the existing files instead of creating new ones if they already exist to achieve the goal.\n`;
 
          // Semantic analysis for richer context
          semanticSummary = getProjectSummaryString(projectPath);
@@ -165,7 +290,7 @@ export class Coordinator {
       ? `Execute ${tasksToRun} remaining tasks? (${completedIds.size} skipped)`
       : `Execute ${graph.tasks.length} tasks?`;
 
-    const confirm = await prompt.confirm({
+    const confirm = !process.stdout.isTTY ? true : await prompt.confirm({
       message: confirmMsg,
       initialValue: true
     });
@@ -193,8 +318,14 @@ export class Coordinator {
 
     spinner.stop('Executing dynamically based on dependencies...');
 
+    // Stop mascot + init the bordered log box
+    stopGlobalMascot();
+    this.initLogBox();
+
+    const MAX_CONCURRENCY = 3;
+
     while (completedIds.size + failedIds.size < graph.tasks.length) {
-      const { runnable, newlyFailed, deferredConflicts } = this.taskManager.getRunnableTasks(
+      const { safeBatch, conflictBatch, newlyFailed, deferredConflicts } = this.taskManager.getNextBatches(
         graph, 
         completedIds, 
         failedIds, 
@@ -203,7 +334,7 @@ export class Coordinator {
       
       // Log deferred conflicts
       for (const def of deferredConflicts) {
-        prompt.log.info(`  ${chalk.dim('⏳')} ${def}: Deferred (file conflict — waiting for sequential access)`);
+        this.pushLog(`  ${chalk.dim('⏳')} ${def}: Deferred (file conflict — waiting for sequential access)`);
       }
 
       for (const f of newlyFailed) {
@@ -215,7 +346,7 @@ export class Coordinator {
           result: '',
           lastError: 'Dependency failed',
         };
-        prompt.log.error(`  ${chalk.red('✗')} ${f}: Skipped (Dependency failed)`);
+        this.pushLog(`  ${chalk.red('✗')} ${f}: Skipped (Dependency failed)`);
 
         failureReport.push({
           taskId: f,
@@ -224,7 +355,15 @@ export class Coordinator {
         });
       }
 
-      for (const task of runnable) {
+      // Combine safeBatch and conflictBatch into dispatchQueue, processed up to MAX_CONCURRENCY
+      // Priority is safe tasks first to maximize isolated parallel execution throughput
+      const dispatchQueue = [...safeBatch, ...conflictBatch];
+
+      for (const task of dispatchQueue) {
+        if (inProgress.size >= MAX_CONCURRENCY) {
+           break; // Wait for a worker slot to open up
+        }
+
         const tDef = graph.tasks.find(t => t.id === task.task_id);
         const desc = tDef ? tDef.description : 'Execute ' + task.task_id;
 
@@ -251,7 +390,7 @@ export class Coordinator {
            const targetPath = join(process.cwd(), "workspace", graph.projectName, tDef.fileOutput);
            if (fs.existsSync(targetPath)) {
                existingCode = fs.readFileSync(targetPath, "utf-8");
-               prompt.log.info(`  ${chalk.dim('↑')} ${task.task_id}: Reading existing file ${tDef.fileOutput}`);
+               this.pushLog(`  ${chalk.dim('↑')} ${task.task_id}: Reading existing file ${tDef.fileOutput}`);
            }
         }
 
@@ -282,7 +421,7 @@ export class Coordinator {
           } else {
             // ── FAILURE RECOVERY: Retry once with correction ──
             const errorMsg = result.errors?.join(', ') || 'Unknown error';
-            prompt.log.warn(`  ${chalk.yellow('🔄')} ${result.task_id}: Failed — attempting recovery retry...`);
+            this.pushLog(`  ${chalk.yellow('🔄')} ${result.task_id}: Failed — attempting recovery retry...`);
 
             try {
               const retryResult = await this.worker.execute(
@@ -309,7 +448,7 @@ export class Coordinator {
                   result: retryResult.result,
                 };
                 completedIds.add(result.task_id);
-                prompt.log.success(`  ${chalk.green('✓')} ${result.task_id}: Recovery succeeded!`);
+                this.pushLog(`  ${chalk.green('✓')} ${result.task_id}: Recovery succeeded!`);
                 result = retryResult; // Use recovered result for downstream
               } else {
                 // Recovery also failed — log and continue
@@ -326,7 +465,7 @@ export class Coordinator {
                   error: errorMsg,
                   suggestion: this.suggestFix(errorMsg, desc),
                 });
-                prompt.log.error(`  ${chalk.red('✗')} ${result.task_id}: Recovery failed. Continuing other tasks.`);
+                this.pushLog(`  ${chalk.red('✗')} ${result.task_id}: Recovery failed. Continuing other tasks.`);
               }
             } catch {
               // Recovery attempt threw — mark failed and continue
@@ -352,7 +491,7 @@ export class Coordinator {
 
           // Evaluate self-correction loop
           if (result.outputType === 'code' && result.status === 'completed' && result.artifacts && result.artifacts.length > 0) {
-            prompt.log.info(`  ${chalk.dim('🔍')} ${result.task_id}: Reviewing generated code...`);
+            this.pushLog(`  ${chalk.dim('🔍')} ${result.task_id}: Reviewing generated code...`);
             let currentCode = result.result;
             let currentArtifactPath = result.artifacts[0];
             
@@ -362,13 +501,13 @@ export class Coordinator {
             while (retryCount < MAX_VERIFICATION_RETRIES) {
               const reviewInstructions = await this.reviewer.evaluate(request, desc, currentCode, config);
               if (reviewInstructions.length === 0) {
-                 prompt.log.success(`  ${chalk.green('✓')} ${result.task_id}: Code verified as correct.`);
+                 this.pushLog(`  ${chalk.green('✓')} ${result.task_id}: Code verified as correct.`);
                  break; // Passed checks
               }
 
-              prompt.log.warn(`  ${chalk.yellow('⚠')} ${result.task_id}: Issues found (Attempt ${retryCount+1}/${MAX_VERIFICATION_RETRIES}). Editing...`);
+              this.pushLog(`  ${chalk.yellow('⚠')} ${result.task_id}: Issues found (Attempt ${retryCount+1}/${MAX_VERIFICATION_RETRIES}). Editing...`);
               for (const instr of reviewInstructions) {
-                 prompt.log.message(`    ${chalk.dim('Fix needed:')} ${instr.issue}`);
+                 this.pushLog(`    ${chalk.dim('Fix needed:')} ${instr.issue}`);
               }
 
               // Editor patches the array
@@ -381,14 +520,27 @@ export class Coordinator {
               retryCount++;
             }
             if (retryCount >= MAX_VERIFICATION_RETRIES) {
-              prompt.log.warn(`  ${chalk.yellow('⚠')} ${result.task_id}: Max verification retries reached for edits.`);
+              this.pushLog(`  ${chalk.yellow('⚠')} ${result.task_id}: Max verification retries reached for edits.`);
             }
           } else if (result.status === 'failed') {
-            prompt.log.error(`  ${chalk.red('✗')} ${result.task_id}: ${result.errors?.join(', ') || 'Failed'}`);
+            this.pushLog(`  ${chalk.red('✗')} ${result.task_id}: ${result.errors?.join(', ') || 'Failed'}`);
           } else if (result.outputType === 'command') {
-            prompt.log.info(`  ${chalk.yellow('⚡')} ${result.task_id}: Command detected (will show below)`);
+            this.pushLog(`  ${chalk.yellow('⚡')} ${result.task_id}: Command detected (will show below)`);
           } else {
-            prompt.log.success(`  ${chalk.green('✓')} ${result.task_id}: Done`);
+            this.pushLog(`  ${chalk.green('✓')} ${result.task_id}: Done`);
+          }
+
+          if (result.status === 'completed' && result.outputType === 'code') {
+            if (graph.projectName && result.task_id) {
+               const node = graph.tasks.find(t => t.id === result.task_id);
+               if (node && node.fileOutput) {
+                 this.registry.registerComponent(graph.projectName, {
+                    id: node.id,
+                    description: node.description,
+                    filePath: node.fileOutput
+                 });
+               }
+            }
           }
 
           return result;
@@ -398,14 +550,18 @@ export class Coordinator {
       }
 
       // Wait if tasks are running but no new tasks can be scheduled yet
-      if (inProgress.size > 0 && runnable.length === 0 && newlyFailed.length === 0 && deferredConflicts.length === 0) {
+      if (inProgress.size > 0 && dispatchQueue.length === 0 && newlyFailed.length === 0 && deferredConflicts.length === 0) {
         await Promise.race(inProgress.values());
-      } else if (inProgress.size === 0 && runnable.length === 0 && newlyFailed.length === 0 && deferredConflicts.length === 0) {
+      } else if (inProgress.size > 0 && inProgress.size >= MAX_CONCURRENCY) {
+        // Enforce concurrency limit by waiting for any running task to finish
+        await Promise.race(inProgress.values());
+      } else if (inProgress.size === 0 && dispatchQueue.length === 0 && newlyFailed.length === 0 && deferredConflicts.length === 0) {
         prompt.log.error("Stalemate: Cannot resolve further tasks due to missing dependencies or cycles.");
         break;
       }
     }
 
+    this.stopLogBox();
     prompt.log.success(`Execution completed!`);
 
     // STEP 8a: OUTPUT CONSISTENCY CHECK
@@ -457,7 +613,7 @@ export class Coordinator {
       console.log(chalk.dim('└─────────────────────────────────────────'));
       console.log();
 
-      const runCommands = await prompt.confirm({
+      const runCommands = !process.stdout.isTTY ? true : await prompt.confirm({
         message: 'Would you like to run these commands automatically?',
         initialValue: true,
       });

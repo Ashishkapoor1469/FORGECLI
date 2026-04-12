@@ -3,6 +3,32 @@ node_modules
 
 #workspace
 workspace/*
+
+#scratch/temp files
+scratch/
 animation.ts
+test-anim.ts
+test-build.ts
+
 #env
 .env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build output
+dist/
+
+# Logs
+*.log
+npm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Encrypted component registries (per-project, inside workspace)
+**/.forge/components.enc
