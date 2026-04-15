@@ -1,6 +1,6 @@
 {
   "name": "forge-cli",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Forge CLI is a command-line interface for scaffolding and managing AI-powered projects.",
   "main": "dist/index.js",
   "scripts": {
