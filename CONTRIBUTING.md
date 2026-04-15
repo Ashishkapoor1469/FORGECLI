@@ -32,12 +32,15 @@ First off, thank you for considering contributing to Forge! It's people like you
 
 ## Project Architecture
 
-Forge is built on a modular "Multi-Agent" architecture. When contributing new features, identify which agent or utility the logic belongs to:
+Forge is built on an Event-Driven "Multi-Tier Agent" architecture. When contributing new features, identify which agent or utility the logic belongs to:
 
+- `src/engine/agentBus.ts`: The global event emitter decoupling agents.
 - `src/agents/planner.ts`: Logic for decomposing requests into tasks.
 - `src/agents/worker.ts`: Logic for file generation and command detection.
 - `src/agents/coordinator.ts`: The central orchestrator wiring all modules together.
-- `src/utils/memory.ts`: Session storage and filtering.
+- `src/agents/testWriter.ts`: Generates and runs unit tests automatically.
+- `src/skills/skillRegistry.ts`: Defines reusable behavior sets and execution blueprints.
+- `src/utils/vectorMemory.ts`: Semantic knowledge retrieval and codebase indexing.
 - `src/utils/crypto.ts`: AES-256 encryption logic.
 
 ## Pull Request Process

@@ -200,28 +200,46 @@ export async function streamSideBySideChat(
 //  Global Floating Mascot
 
 let globalAnimationInterval: NodeJS.Timeout | null = null;
+let boundResizeHandler: (() => void) | null = null;
 
 export function startGlobalMascot(activeMascotName: string | null) {
-  if (globalAnimationInterval) clearInterval(globalAnimationInterval);
+  if (globalAnimationInterval) stopGlobalMascot();
   if (!process.stdout.isTTY) return;
 
   const mascotFrames = MASCOTS[activeMascotName || ''] || MASCOTS.Default;
   let currentFrame = 0;
+  
+  let lastCols = process.stdout.columns || 80;
+  let lastRows = process.stdout.rows || 24;
+
+  const handleMascotResize = () => {
+    const cols = process.stdout.columns || 80;
+    const rows = process.stdout.rows || 24;
+    
+    // Attempt aggressive screen repair on resize
+    process.stdout.write('\x1b[2J\x1b[H'); 
+    lastCols = cols;
+    lastRows = rows;
+  };
+
+  boundResizeHandler = handleMascotResize;
+  process.stdout.on('resize', boundResizeHandler);
 
   const drawMascot = () => {
       const cols = process.stdout.columns || 80;
       const rows = process.stdout.rows || 24;
       
-      // Calculate layout
+      // Dynamic Layout Calculation
       const dividerCol = Math.floor(cols * 0.85);
       const rightPaneStartX = dividerCol + 2; 
-      
-      // Avoid printing to the exact edge (cols) to prevent terminal auto-wrap and scrolling
       const MASCOT_WIDTH = Math.max(0, cols - rightPaneStartX);
       const rightBg = " ".repeat(MASCOT_WIDTH);
       
+      if (cols !== lastCols || rows !== lastRows) {
+         handleMascotResize();
+      }
+
       let out = "";
-      
       // Save cursor
       out += '\x1b[s';
       
@@ -231,7 +249,6 @@ export function startGlobalMascot(activeMascotName: string | null) {
       }
       
       const frame = mascotFrames[currentFrame];
-      // Keep safety margin at bottom to prevent scrolling the terminal
       const startRow = (rows - 1) - frame.length - 1;
       
       // Clear the ENTIRE right pane above the mascot to erase fast-scroll trails
@@ -269,5 +286,9 @@ export function stopGlobalMascot() {
   if (globalAnimationInterval) {
     clearInterval(globalAnimationInterval);
     globalAnimationInterval = null;
+  }
+  if (boundResizeHandler) {
+    process.stdout.removeListener('resize', boundResizeHandler);
+    boundResizeHandler = null;
   }
 }

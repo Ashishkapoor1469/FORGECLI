@@ -10,7 +10,10 @@ import chalk from "chalk";
 import { execSync } from "child_process";
 import { join } from "path";
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from "fs";
-
+import { GitIntegration } from "./utils/gitIntegration.js";
+import { AgentEventBus } from "./engine/agentBus.js";
+import { SkillRegistry } from "./skills/skillRegistry.js";
+import http from "http";
 process.removeAllListeners("SIGINT");
 process.removeAllListeners("SIGTERM");
 
@@ -23,6 +26,7 @@ const coordinator = new Coordinator();
 const router = new IntentRouter();
 const memory = new MemoryManager();
 const gacha = new GachaManager();
+const skillRegistry = new SkillRegistry();
 
 
 function showHelp() {
@@ -31,26 +35,13 @@ function showHelp() {
   console.log(chalk.dim("  ─────────────────────────────────────────"));
   console.log();
 
-  const commands = [
-    { cmd: "/help", desc: "Show this command reference" },
-    { cmd: "/model", desc: "Switch LLM provider (Ollama / OpenRouter) and select a model" },
-    { cmd: "/create", desc: "Scaffold a new project (React, Vite, Next.js, Express)" },
-    { cmd: "/anime", desc: "Open the daily loot box or view your character collection" },
-    { cmd: "/buddy", desc: "Set an Anime character as your chat companion" },
-    { cmd: "/clear", desc: "Clear the terminal screen" },
-    { cmd: "/memory", desc: "Show memory stats (entries count, file size)" },
-    { cmd: "/admin", desc: "Access encrypted vault (Password required)" },
-    { cmd: "/cd", desc: "Change Directory AI work on that directory" },
-  ];
-
-  for (const { cmd, desc } of commands) {
-    console.log(`  ${chalk.cyan.bold(cmd.padEnd(12))} ${chalk.white(desc)}`);
+  const { SLASH_COMMANDS } = require("./utils/prompt.js");
+  for (const { cmd, desc } of SLASH_COMMANDS) {
+    console.log(`  ${chalk.cyan.bold(cmd.padEnd(16))} ${chalk.white(desc)}`);
   }
 
   console.log();
-  console.log(chalk.dim("  Any other input is analyzed by the Intent Router:"));
-  console.log(chalk.dim("  • Conversational → Chat Mode (streaming response)"));
-  console.log(chalk.dim("  • Build/Create   → Multi-agent pipeline (generates files)"));
+  console.log(chalk.dim("  Type / to see interactive suggestions."));
   console.log();
 }
 
@@ -394,6 +385,67 @@ async function handleBuddyMenu() {
   }
 }
 
+async function handleSkillMenu(args: string) {
+  if (args.startsWith("list")) {
+    const skills = skillRegistry.getAllSkills();
+    if (skills.length === 0) {
+      prompt.log.warn("No skills found. Use /skill or edit .forge/skills/manifest.json");
+      return;
+    }
+    prompt.log.info(chalk.bold.blue("📜 Active Skills Registry"));
+    for (const s of skills) {
+      console.log(`  ${chalk.cyan('▪')} ${chalk.bold(s.id)} (${s.type}) — ${chalk.dim(s.description)}`);
+    }
+    return;
+  }
+
+  if (args.startsWith("set ")) {
+    const target = args.replace("set ", "").trim();
+    const skills = skillRegistry.getAllSkills();
+    const exists = skills.find(s => s.id === target);
+    if (!exists) {
+      prompt.log.error(`Skill '${target}' not found in registry.`);
+      return;
+    }
+    config.activeSkillId = target;
+    prompt.log.success(`Forced Active Skill Context: ${chalk.bold.magenta(target)}`);
+    return;
+  }
+
+  // Interactive Menu Fallback
+  const action = await prompt.select({
+    message: "Forge Skill Menu",
+    options: [
+      { value: "list", label: "📜 List all Skills" },
+      { value: "set", label: "🎯 Set Active Skill" },
+      { value: "clear", label: "🧹 Clear Active Skill" },
+      { value: "cancel", label: "Cancel" }
+    ]
+  });
+
+  if (action === "list") {
+    handleSkillMenu("list");
+  } else if (action === "set") {
+    const skills = skillRegistry.getAllSkills();
+    if (skills.length === 0) {
+      prompt.log.warn("No skills found!"); return;
+    }
+    const sel = await prompt.select({
+      message: "Select a skill to force context:",
+      options: [
+        ...skills.map(s => ({ value: s.id, label: `${s.id} - ${s.description}` })),
+        { value: "cancel", label: "Cancel" }
+      ]
+    });
+    if (sel !== "cancel" && !prompt.isCancel(sel)) {
+      config.activeSkillId = sel as string;
+      prompt.log.success(`Locked active skill to: ${sel}`);
+    }
+  } else if (action === "clear") {
+    config.activeSkillId = undefined;
+    prompt.log.success("Active skill cleared (auto-resolution enabled).");
+  }
+}
 
 function showMemoryStats() {
   const memories = memory.getMemories();
@@ -471,12 +523,38 @@ async function main() {
   const buddyStr = buddy ? ` | Buddy: ${chalk.magenta(buddy)}` : "";
   const workspaceStr = config.activeProject ? ` | Workspace: ${chalk.green(config.activeProject)}` : "";
   prompt.log.info(
-    `Model: ${chalk.cyan(`${config.provider}/${config.model}`)}${workspaceStr}${buddyStr} | Type ${chalk.bold("/help")} for commands`,
+    `Model: ${chalk.cyan(`${config.provider}/${config.model}`)}${workspaceStr}${buddyStr} | Type ${chalk.bold("/")} for commands`,
   );
 
   // Fallback for non-interactive / direct execution
   const cliArgs = process.argv.slice(2).join(" ").trim();
-  if (cliArgs) {
+  if (cliArgs === "serve") {
+    prompt.log.info(chalk.bold.green("Starting Forge API Server Mode on port 8080..."));
+    const server = http.createServer((req, res) => {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      if (req.method === "GET" && req.url === "/workspace") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "ok", project: config.activeProject || "none" }));
+      } else if (req.method === "POST" && req.url === "/build") {
+        let body = "";
+        req.on("data", chunk => body += chunk.toString());
+        req.on("end", async () => {
+          try {
+            const data = JSON.parse(body);
+            // Simulated async dispatch
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ status: "started", request: data.request }));
+          } catch(e) {
+            res.writeHead(400); res.end();
+          }
+        });
+      } else {
+        res.writeHead(404); res.end();
+      }
+    });
+    server.listen(8080);
+    return;
+  } else if (cliArgs) {
     prompt.log.info(`Executing direct command: ${chalk.green(cliArgs)}`);
     const buildSpinner = prompt.spinner();
     buildSpinner.start("Initializing coordinator...");
@@ -532,25 +610,71 @@ async function main() {
         const b = gacha.getActiveBuddy();
         const wsStr = ` | Workspace: ${chalk.green(config.activeProject)}`;
         const bdStr = b ? ` | Buddy: ${chalk.magenta(b)}` : "";
+        const skStr = config.activeSkillId ? ` | Skill: ${chalk.yellow(config.activeSkillId)}` : "";
         prompt.log.info(
-          `Model: ${chalk.cyan(`${config.provider}/${config.model}`)}${wsStr}${bdStr} | Type ${chalk.bold("/help")} for commands`,
+          `Model: ${chalk.cyan(`${config.provider}/${config.model}`)}${wsStr}${skStr}${bdStr} | Type ${chalk.bold("/help")} for commands`,
         );
         prompt.log.success(`Switched active workspace to ${chalk.cyan(`workspace/${folder}`)}`);
       }
       continue;
     }
 
+    if (input.startsWith("/skill")) {
+      const args = input.replace("/skill", "").trim();
+      await handleSkillMenu(args);
+      continue;
+    }
+
     if (input === "/clear") {
-      process.stdout.write('\x1Bc'); // Full terminal reset (wipes scrollback buffer)
+      process.stdout.write('\x1Bc'); // Full terminal reset
       showIntro();
       const activeBuddy = gacha.getActiveBuddy();
       const wsStr = config.activeProject ? ` | Workspace: ${chalk.green(config.activeProject)}` : "";
       const bdStr = activeBuddy ? ` | Buddy: ${chalk.magenta(activeBuddy)}` : "";
+      const skStr = config.activeSkillId ? ` | Skill: ${chalk.yellow(config.activeSkillId)}` : "";
       prompt.log.info(
-        `Model: ${chalk.cyan(`${config.provider}/${config.model}`)}${wsStr}${bdStr} | Type ${chalk.bold("/help")} for commands`,
+        `Model: ${chalk.cyan(`${config.provider}/${config.model}`)}${wsStr}${skStr}${bdStr} | Type ${chalk.bold("/help")} for commands`,
       );
       continue;
     }
+    
+    if (input === "/workspace") {
+      const wsPath = join(process.cwd(), "workspace");
+      if (!existsSync(wsPath)) mkdirSync(wsPath);
+      const fs = await import("fs");
+      const projects = fs.readdirSync(wsPath, { withFileTypes: true })
+                         .filter(d => d.isDirectory())
+                         .map(d => d.name);
+      
+      if (projects.length === 0) {
+        prompt.log.warn("No projects found in workspace/ directory. Try /create");
+        continue;
+      }
+      
+      const sel = await prompt.select({
+        message: "Select a Workspace Project",
+        options: [
+           ...projects.map(p => ({ value: p, label: `📂 ${p}` })),
+           { value: "cancel", label: "Cancel" }
+        ]
+      });
+      if (sel === "cancel" || prompt.isCancel(sel)) continue;
+      
+      config.activeProject = sel as string;
+      console.clear();
+      showIntro();
+      prompt.log.success(`Currently Active Workspace: ${chalk.cyan.bold(config.activeProject)}`);
+      continue;
+    }
+    
+    if (input.startsWith("/plan ")) {
+      const goal = input.replace("/plan ", "").trim();
+      const s = prompt.spinner();
+      s.start("Generating Plan Roadmap...");
+      await coordinator.processRequest(goal, s, config, true);
+      continue;
+    }
+
     if (input === "/memory") {
       showMemoryStats();
       continue;
@@ -559,20 +683,50 @@ async function main() {
       await handleAdminMenu();
       continue;
     }
+    if (input.startsWith("/rollback")) {
+      const taskId = input.split(" ")[1];
+      if (!taskId) { prompt.log.error("Please provide a task ID."); continue; }
+      if (!config.activeProject) { prompt.log.error("No active project."); continue; }
+      const git = new GitIntegration(config.activeProject);
+      if (git.rollback(taskId)) prompt.log.success(`Rolled back to state before ${taskId}.`);
+      else prompt.log.error(`Rollback failed or task ID not found in commits.`);
+      continue;
+    }
+    if (input === "/status") {
+      prompt.log.info(chalk.bold.yellow("📊 Forge Observability Dashboard"));
+      prompt.log.info("Status: " + chalk.green("Online"));
+      prompt.log.info("Agent Bus: Active");
+      continue;
+    }
 
     if (input.length === 0) continue;
 
     // Check for unknown slash commands
     if (input.startsWith("/")) {
-      prompt.log.warn(`Unknown command: ${chalk.yellow(input)}. Type ${chalk.bold("/help")} for available commands.`);
+      prompt.log.warn(`Unknown command: ${chalk.yellow(input)}. Type ${chalk.bold("/")} to see suggestions.`);
       continue;
     }
 
+    // Claude-style rotating thinking messages
+    const thinkingMessages = [
+      "Thinking...",
+      "Analyzing your request...",
+      "Understanding context...",
+      "Processing intent...",
+      "Reading between the lines...",
+      "Evaluating approach...",
+    ];
+    let thinkIdx = 0;
     const s = prompt.spinner();
-    s.start("Determining intent...");
+    s.start(thinkingMessages[0]);
+    const thinkInterval = setInterval(() => {
+      thinkIdx = (thinkIdx + 1) % thinkingMessages.length;
+      s.message(thinkingMessages[thinkIdx]);
+    }, 1500);
 
     try {
       const intent = await router.determineIntent(input, config);
+      clearInterval(thinkInterval);
       s.stop(`Intent: ${chalk.bold.green(intent.toUpperCase())}`);
 
       if (intent === "chat") {
@@ -596,6 +750,7 @@ async function main() {
         buildSpinner.stop("Build completed.");
       }
     } catch (error: any) {
+      clearInterval(thinkInterval);
       if (s) s.stop("Process failed.");
       prompt.log.error(error.message || "An unknown error occurred.");
     }

@@ -19,6 +19,11 @@ import * as fs from 'fs';
 import { ComponentRegistry } from '../utils/registry.js';
 import { stopGlobalMascot, startGlobalMascot } from '../utils/ui.js';
 
+import { GitIntegration } from '../utils/gitIntegration.js';
+import { IncrementalCache } from '../utils/incrementalCache.js';
+import { VectorMemory } from '../utils/vectorMemory.js';
+import { DependencyIntelligence } from '../utils/dependencyIntelligence.js';
+
 export class Coordinator {
   private planner = new Planner();
   private taskManager = new TaskManager();
@@ -38,15 +43,33 @@ export class Coordinator {
     return s.replace(/\x1B\[[0-9;]*m/g, '');
   }
 
-  /**
-   * Initialize the Claude-style bordered log box in the bottom ~38% of terminal.
-   *
-   *  ┌─── ⚡ Forge Execution Log ────────────────────────────────┐
-   *  │  ✓ task-1: Code verified as correct.              │
-   *  │  🔍 task-2: Reviewing generated code...             │
-   *  │                                                     │
-   *  └─────────────────────────────────────────────────────┘
-   */
+  private handleResize = () => {
+    if (this.boxTop <= 0) return; // Means log box is not active
+    const rows = process.stdout.rows || 24;
+    const cols = process.stdout.columns || 80;
+
+    // Erase old log box if possible
+    process.stdout.write('\x1b[2J\x1b[3J\x1b[H'); // Clears screen on resize to prevent artifacting
+
+    this.boxHeight = Math.max(7, Math.floor(rows * 0.38));
+    this.boxWidth = Math.max(40, cols - 4);
+    this.boxTop = rows - this.boxHeight;
+
+    this.drawFrame();
+    
+    // Redraw existing logs
+    this.pushLog('');
+  };
+
+  
+   //Initialize the Claude-style bordered log box in the bottom ~38% of terminal.
+   //
+   // ┌─── ⚡ Forge Execution Log ────────────────────────────────┐
+   // │  ✓ task-1: Code verified as correct.              │
+   // │  🔍 task-2: Reviewing generated code...             │
+   // │                                                     │
+   // └─────────────────────────────────────────────────────┘
+   
   private initLogBox() {
     const rows = process.stdout.rows || 24;
     const cols = process.stdout.columns || 80;
@@ -59,15 +82,21 @@ export class Coordinator {
     process.stdout.write('\n'.repeat(this.boxHeight));
 
     this.drawFrame();
+    
+    process.stdout.on('resize', this.handleResize);
   }
 
-  /** Draw the box border frame */
+  //Draw the box border frame
   private drawFrame() {
     const innerW = this.boxWidth - 2;
     const title = ' ⚡ Forge Execution Log ';
     const topRight = '─'.repeat(Math.max(0, innerW - title.length - 3));
     const topLine = '  ' + chalk.dim('┌───') + chalk.bold.hex('#74B9FF')(title) + chalk.dim(topRight + '┐');
-    const botLine = '  ' + chalk.dim('└' + '─'.repeat(innerW) + '┘');
+    
+    // Bottom Status Bar
+    const statusText = ` Running... | Press Ctrl+C to stop `;
+    const botRight = '─'.repeat(Math.max(0, innerW - statusText.length - 1));
+    const botLine = '  ' + chalk.dim('└' + '─') + chalk.bold.hex('#bdc3c7')(statusText) + chalk.dim(botRight + '┘');
 
     let out = '\x1b[s';
 
@@ -86,10 +115,9 @@ export class Coordinator {
     process.stdout.write(out);
   }
 
-  /**
-   * Push a log line into the chat box. Old lines scroll up, new lines
-   * appear at the bottom. The frame stays fixed.
-   */
+  //Push a log line into the chat box. Old lines scroll up, new lines
+  //appear at the bottom. The frame stays fixed.
+  
   private pushLog(msg: string) {
     this.allLogs.push(msg);
 
@@ -131,11 +159,12 @@ export class Coordinator {
     process.stdout.write(out);
   }
 
-  /**
-   * Clear the log box and restore terminal for normal clack output.
-   */
+  //Clear the log box and restore terminal for normal clack output.
+  
   private stopLogBox() {
     if (this.boxTop <= 0) return;
+    
+    process.stdout.removeListener('resize', this.handleResize);
 
     let out = '\x1b[s';
     for (let r = this.boxTop; r < this.boxTop + this.boxHeight; r++) {
@@ -148,7 +177,13 @@ export class Coordinator {
     this.boxTop = 0;
   }
 
-  async processRequest(request: string, spinner: any, config: ProviderConfig): Promise<void> {
+  private extractVectorContext(request: string, memory: VectorMemory): string {
+    const results = memory.search(request, 3);
+    if (results.length === 0) return '';
+    return '\nVECTOR MEMORY CONTEXT:\n' + results.map(r => `File: ${r.filePath}\nMatch: ${r.name}\n`).join('\n');
+  }
+
+  async processRequest(request: string, spinner: any, config: ProviderConfig, isPlanMode: boolean = false): Promise<void> {
     // Reset state for each new request to avoid stale data
     const state: GlobalState = {
       taskRegistry: {},
@@ -231,6 +266,9 @@ export class Coordinator {
          if (semanticSummary) {
            workspaceContext += `\nPROJECT ANALYSIS:\n${semanticSummary}\n`;
          }
+
+         const vectorMemory = new VectorMemory();
+         workspaceContext += this.extractVectorContext(request, vectorMemory);
        }
     }
 
@@ -243,6 +281,26 @@ export class Coordinator {
     }
 
     spinner.stop('Task Graph generated.');
+
+    if (isPlanMode) {
+      prompt.log.info(chalk.bold.blue('🗺️  Generated Plan Roadmap'));
+      
+      const stParams: any = {};
+      for (const t of graph.tasks) {
+        console.log(`  ${chalk.cyan('▪')} [${t.id}] ${t.description}`);
+        stParams[t.id] = { status: 'pending', agent: 'worker', retryCount: 0, result: '' };
+      }
+      
+      this.memory.saveMemory({
+        timestamp: new Date().toISOString(),
+        request: request,
+        graph: graph,
+        results: stParams,
+      });
+
+      prompt.log.success('Plan saved. Type anything to trigger the build and resume this plan.');
+      return;
+    }
 
     if (graph.projectName) {
       prompt.log.info(`Project: ${chalk.cyan(graph.projectName)}`);
@@ -321,6 +379,12 @@ export class Coordinator {
     // Stop mascot + init the bordered log box
     stopGlobalMascot();
     this.initLogBox();
+
+    const git = graph.projectName ? new GitIntegration(graph.projectName) : null;
+    if (git && !git.isInitialized()) {
+      git.init();
+    }
+    const buildCache = new IncrementalCache();
 
     const MAX_CONCURRENCY = 3;
 
@@ -539,8 +603,12 @@ export class Coordinator {
                     description: node.description,
                     filePath: node.fileOutput
                  });
+                 // Store vector
+                 const vectorMemory = new VectorMemory();
+                 vectorMemory.upsert(node.fileOutput, node.id, result.result);
                }
             }
+            if (git) git.commitTaskGraph(result.task_id, desc);
           }
 
           return result;

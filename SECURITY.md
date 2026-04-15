@@ -25,10 +25,11 @@ Forge protects your sensitive data (session memory and gacha state) using indust
 
 ## Environment & Secrets
 
-Forge handles sensitive API keys (e.g., `OPENROUTER_API_KEY`) and administrative passwords via environment variables.
+Forge handles sensitive API keys (e.g., `OPENROUTER_API_KEY`) and administrative passwords via environment variables, and project-specific secrets via the **Secret Manager**.
 
 - **.env File**: Always keep your `.env` file in the project root. It is listed in `.gitignore` by default. Never commit this file to version control.
 - **Admin Vault**: The `/admin` command is protected by a password defined in your environment (`ADMIN_PASSWORD`). The default value is `admin123`; we strongly recommend changing this for production use.
+- **Secret Manager (`.forge/secrets.enc`)**: Project-specific secrets (like database connection strings, OAuth tokens) are stored in an encrypted vault. They are never directly exposed to LLM prompts but are instead rendered into execution environments safely at runtime using AES-256 decryption.
 
 ## Workspace Security
 

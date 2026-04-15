@@ -9,7 +9,7 @@
   ╚═╝      ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝
 ```
 
-**Forge** is a production-grade multi-agent AI coding system that runs directly inside your terminal. Inspired by Claude Code, it orchestrates intelligent agents to plan, schedule, and execute software development tasks — generating real files in your workspace.
+**Forge** is a production-grade AI Software Engineering OS that runs directly inside your terminal. It orchestrates intelligent agents across an Event-Based Bus to plan, schedule, generate, test, and version-control software development tasks — with a professional CLI UX inspired by Claude Code and Gemini CLI.
 
 ---
 
@@ -63,36 +63,25 @@
 
 | Feature | Description |
 |---|---|
-| 🧠 **Multi-Agent Orchestration** | Planner, Task Manager, Worker, Reviewer, and Editor agents coordinate automatically |
-| 🔀 **Intent Router** | Detects if you want to chat or build — no manual mode switching |
-| ⚡ **Parallel Wave Execution** | Tasks are grouped and executed concurrently where possible |
-| 🔍 **Self-Correction Loop** | Reviewer agent audits generated code; Editor agent patches issues automatically |
-| 🗂️ **Workspace Context Awareness** | Reads existing project files before planning to enable intelligent edits |
-| 🛡️ **AES-256 Encrypted Storage** | Memory, gacha state, and component registries encrypted at rest |
-| 🔐 **Admin Vault** | Password-protected admin panel for managing encrypted data |
-| 💬 **Streaming Chat** | Token-by-token streaming with 85/15 split-pane terminal layout |
-| 🗂️ **Persistent Memory** | Sessions logged to encrypted `.forge/memory.dat` with automatic trimming |
-| 🔌 **Dual Provider Support** | Works with local Ollama models OR cloud OpenRouter models |
-| 💾 **Saved Models** | Remembers previously used models for quick switching |
-| 📁 **Real File Generation** | Creates actual folders and source files in your `workspace/` directory |
-| 🚀 **Project Scaffolding** | `/create` command for Vanilla HTML, React (Bun), Vite, Next.js, and Express |
-| ⚡ **Auto Command Execution** | AI-suggested commands can be run automatically with user approval |
-| 📂 **Workspace Switching** | `/cd` command to switch active project context |
-| 🎮 **Anime Gacha System** | Daily loot boxes to unlock Anime character companions |
-| 🦊 **Dynamic Buddy Personas** | Your buddy companion alters the LLM's chat personality |
-| 🎨 **Animated ASCII Mascots** | Persistent animated mascot in the right pane of a split terminal |
-| 🧹 **Smart Memory Filtering** | Only essential context (project name, files, tech stack) is sent to the LLM — never raw logs or full code |
-| 🔄 **Resume & Continue Builds** | Detects incomplete builds and resumes from the last valid state, skipping completed tasks |
-| 🛡️ **Conflict-Safe Parallel** | Prevents race conditions by deferring tasks that target the same file to sequential execution |
-| 🌱 **Project Evolution Mode** | Extends existing projects by modifying files in-place — never recreates or duplicates |
-| 🔎 **Semantic Code Understanding** | Analyzes project structure (tech stack, entry points, routes, components) before planning |
-| ♻️ **Intelligent Refactoring** | Detects refactor/improve tasks and applies minimal, behavior-preserving changes |
-| 🩹 **Failure Recovery** | Retries failed tasks once with error context, then logs failures and continues |
-| ✅ **Task Validation** | Pre-execution graph validation: rejects vague tasks, detects circular deps, warns on file conflicts |
-| 🔗 **Output Consistency** | Post-build cross-file reference checking: validates HTML links, JS imports, and suggests fixes |
-| 📋 **Execution Log Box** | Claude-style bordered chat panel with fixed frame and scrolling log content |
-| 🗃️ **Component Registry** | AES-256 encrypted catalog tracking every generated component with metadata |
-| 🔗 **Cross-Agent Context** | Decoded component registry is injected into Planner and Worker prompts for perfect module linking |
+| 🧠 **Multi-Tier Agents** | Features Planner, Validator, Task Manager, Tiered Workers, Reviewer, Editor, and TestWriter agents. |
+| 🔌 **Event-Based Agent Bus** | Non-blocking execution via `EventEmitter` for robust sub-agent coordination. |
+| 🔀 **Intent Router & Clarification** | Detects chat, plan, vs builds. Asks clarification questions (tech stack, styling) if the intent is vague. |
+| ⚡ **Multi-Model Routing** | Dynamically selects model per task (Heavy reasoning → Cloud Model; Fast execution → Local Model). |
+| 🛡️ **Validator Agent** | Dedicated stage that runs the actual build, checks runtime errors, and broken imports automatically. |
+| 🔍 **Advanced Error Localization** | Maps any error to the exact file + line range to isolate the region without reprocessing the full file. |
+| 🌱 **Smart File Diff Engine** | Shows a diff-style preview (`--- old` `+++ new`) before applying surgical line-by-line code patches. |
+| 🧩 **Replanning System** | On major task failure, regenerates the *entire* plan using current files + error logs instead of just retrying. |
+| 💾 **Semantic Code Index** | Uses Local Embeddings to catalog codebase logic into an injected Code Vector space. |
+| 🔐 **Goal Progress Tracking** | Tracks overall goal completion % and halts only when functional success is achieved. |
+| 📦 **Dependency Safety System** | Checks package health, flags vulnerable/deprecated libraries, and triggers a Pre-Build Safety Prompt. |
+| 🚀 **Background Execution Mode** | Runs silently in the background while the user does other things; async logs checkable via `/status`. |
+| 🎨 **Professional CLI UX** | Interactive slash-command autocomplete, rotating thinking spinners, and auto-healing terminal resize. |
+| 🔧 **Skill Registry** | Reusable AI behavior templates stored in `.forge/skills/manifest.json` with `/skill` management. |
+| 🔄 **Pause/Resume Mid-Execution** | Pause, resume, or cancel individual tasks dynamically without losing progress. |
+| ⌨️ **CTRL+0 Auto Loop Mode** | Skips all manual confirmations and runs continuously until the master goal is fully achieved. |
+| 🐳 **Deployment Generator** | Scaffolds Dockerfiles, `docker-compose.yml`, and CI Github Actions. |
+| 💬 **Streaming Chat** | Token-by-token streaming with 85/15 split-pane terminal layout. |
+| 🦊 **Dynamic Buddies** | Unlock anime mascots that adjust the conversational persona. |
 
 ---
 
@@ -204,24 +193,39 @@ npm run dev
 
 ## CLI Commands
 
-You can type these commands at any prompt inside Forge:
+Forge features an **interactive slash-command autocomplete** — just type `/` and a filterable dropdown appears with all available commands. Use **Arrow ↑↓** to navigate, **Tab** to accept inline, and **Enter** to submit.
 
 | Command | Action |
 |---|---|
-| `/help` | **Show all available commands** with descriptions |
 | `/model` | Switch LLM provider (Ollama / OpenRouter), select a model, or load a saved one |
 | `/create` | **Scaffold a new project** — Vanilla HTML, React (Bun), Vite, Next.js, or Express |
+| `/workspace` | Full workspace panel: scan, list, select projects |
+| `/plan <goal>` | Enter **PLAN MODE**: generates a task graph, saves it, and stops without building |
+| `/skill` | **Skill Manager**: list, set active, or clear agent skill contexts |
+| `/skill list` | Display all registered skills from `.forge/skills/manifest.json` |
+| `/skill set <id>` | Force a specific skill's context into every worker prompt |
 | `/cd <folder>` | **Switch active workspace** to an existing project in `workspace/` |
+| `/rollback <taskId>` | **Revert workspace snapshot** to the point before a specific task ID executed |
+| `/status` | **View Observability Dashboard** for Agent metrics, Background execution, and bus states |
 | `/anime` | Open the daily loot box or view your character collection |
 | `/buddy` | Set an active Anime character as your chat companion |
-| `/clear` | Clear the terminal screen (full scrollback reset) |
 | `/memory` | Show memory stats (entries count, build/chat breakdown) |
 | `/admin` | **Access encrypted vault** (password required) |
+| `/clear` | Clear the terminal screen (full scrollback reset) |
+| `/help` | Show the full command reference list |
+
+Alternatively, you can launch the API server mode by running:
+```bash
+forge serve
+```
+This spawns an HTTP listener on port 8080.
 
 ### Natural Language
-Any other input is automatically analyzed by the **Intent Router**:
-- **Conversational** → Forge enters Chat Mode and streams a direct response.
-- **Build/Create task** → Forge triggers the full multi-agent pipeline.
+Any other input is automatically analyzed by the **Intent Router** with a Claude-style rotating thinking indicator (`Thinking...`, `Analyzing your request...`, `Understanding context...`). The system operates across 3 primary modes:
+- **CHAT MODE** → Streams direct conversational responses.
+- **PLAN MODE (`/plan`)** → Evaluates context & generates a roadmap without building.
+- **BUILD MODE** → Triggers the full multi-agent pipeline to generate files.
+If input is vague (e.g. "build a todo app"), the Intent Router will automatically ask clarification questions regarding tech stack, styling, and database choices.
 
 ---
 
@@ -363,7 +367,87 @@ During multi-agent builds, Forge renders a **Claude-style bordered chat box** in
 
 ## Advanced Features
 
-Forge includes an **Advanced Features Extension** — a suite of 9 capabilities that make the build system more stable, intelligent, reliable, and realistic.
+Forge includes an **Advanced Features Extension** — a suite of capabilities that make the build system more stable, intelligent, reliable, and realistic.
+
+### Interactive Slash Autocomplete
+
+Inspired by **Claude Code** and **Gemini CLI**, Forge features a real-time filterable slash-command dropdown:
+
+```
+◆  forge ›  /sk
+  ❯ /skill           Manage Agent Skills
+    /status          Show observability dashboard
+```
+
+- Type `/` → all 13+ commands appear as dim-gray suggestions
+- Continue typing → list filters instantly to matching commands
+- **Arrow ↑↓** to navigate, **Tab** to accept inline, **Enter** to submit
+- Only the selected item is highlighted in bright cyan; the rest stay low-opacity
+
+### Skill Registry
+
+Forge supports a **Skill System** that lets you define reusable AI behavior templates. Skills are stored in `.forge/skills/manifest.json`:
+
+```json
+{
+  "react_component": {
+    "id": "react_component",
+    "version": "1.0",
+    "description": "Scaffolds a functional React component",
+    "type": "code",
+    "successRate": 1.0,
+    "runs": 0,
+    "executorData": "Always use functional components with arrow functions..."
+  }
+}
+```
+
+**Manage skills via the CLI:**
+- `/skill` → Interactive menu (List / Set Active / Clear)
+- `/skill list` → Show all registered skills
+- `/skill set react_component` → Force that skill's `executorData` into every worker prompt
+- When active, the status bar shows: `Model: ollama/glm-5:cloud | Skill: react_component`
+
+### Rotating Thinking Indicator
+
+When processing natural language input, Forge displays a Claude-style rotating spinner with changing messages:
+
+```
+⠋ Thinking...
+⠙ Analyzing your request...
+⠹ Understanding context...
+⠸ Processing intent...
+⠼ Reading between the lines...
+⠴ Evaluating approach...
+```
+
+Messages cycle every 1.5 seconds, providing constant visual feedback that the system is working.
+
+### Auto-Healing Terminal Resize
+
+Forge handles terminal resizing gracefully:
+- The **85/15 split-pane** layout dynamically recalculates on `process.stdout.on('resize')`
+- The **Execution Log Box** clears artifacts and redraws its frame at new dimensions
+- The **Mascot Pane** fully repairs itself — no more smeared ASCII art on resize
+
+### Plan Mode (`/plan`)
+
+Generate a complete build roadmap without executing anything:
+
+```
+◇  forge › /plan build a login page with React
+⠋ Generating Plan Roadmap...
+
+🗺️  Generated Plan Roadmap
+  ▪ [task-1] Create package.json with React dependencies
+  ▪ [task-2] Create main App component
+  ▪ [task-3] Create LoginForm component
+  ▪ [task-4] Add CSS styles
+
+✓ Plan saved. Type anything to trigger the build and resume this plan.
+```
+
+The plan is saved to encrypted memory. On the next build request, Forge detects the pending plan and offers to resume it.
 
 ### Smart Memory Filtering
 
@@ -792,31 +876,46 @@ FORGECLI/
 │   ├── index.ts              # CLI entry point & REPL loop
 │   ├── types.ts              # TypeScript interfaces (Task, GlobalState, etc.)
 │   ├── agents/
-│   │   ├── coordinator.ts    # Orchestrates the full 8-step advanced pipeline
-│   │   ├── planner.ts        # Decomposes requests into TaskGraph (+ evolution mode)
-│   │   ├── taskManager.ts    # Conflict-safe dynamic dependency scheduling
-│   │   ├── taskValidator.ts  # Pre-execution graph validation (cycles, conflicts)
-│   │   ├── worker.ts         # Executes tasks (+ evolution, refactoring, retry context)
-│   │   ├── router.ts         # Intent detection + chat streaming
-│   │   ├── reviewer.ts       # Code quality auditor (placeholder/syntax detection)
-│   │   └── editor.ts         # Precision code patcher (line-level edits)
+│   │   ├── coordinator.ts    # Orchestrates the full Advanced pipeline
+│   │   ├── planner.ts        # Decomposes requests into TaskGraph
+│   │   ├── taskManager.ts    # Conflict-safe CPM dynamic scheduler
+│   │   ├── taskValidator.ts  # Pre-execution structural graph validation
+│   │   ├── worker.ts         # Executes tasks (Evolution, Refactoring rules)
+│   │   ├── reviewer.ts       # Audits generated code for bugs
+│   │   ├── editor.ts         # Patches issues identified by reviewer
+│   │   ├── testWriter.ts     # Auto-generates and runs unit tests
+│   │   └── router.ts         # Intent detection + chat streaming
+│   ├── engine/
+│   │   ├── agentBus.ts       # Non-blocking EventEmitter system
+│   │   ├── diffEngine.ts     # AST-lite fast patch generator
+│   │   └── pluginManager.ts  # Dynamic loader for .forge/plugins/*.js
+│   ├── skills/
+│   │   └── skillRegistry.ts  # Manages reusable AI behavior templates
 │   ├── llm/
-│   │   ├── ollama.ts         # Ollama client (local models)
-│   │   └── openrouter.ts     # OpenRouter client (cloud models, streaming)
+│   │   ├── ollama.ts         # Native Ollama API bindings
+│   │   └── openrouter.ts     # Native OpenRouter API bindings
 │   └── utils/
-│       ├── ui.ts             # ASCII mascots, split-pane layout, terminal utils
-│       ├── memory.ts         # Encrypted memory (+ smart filtering, resume detection)
-│       ├── registry.ts       # AES-256 encrypted component catalog (per-project)
-│       ├── semanticAnalyzer.ts # Project structure analysis (tech, routes, components)
-│       ├── consistencyChecker.ts # Post-build cross-file reference validation
-│       ├── gacha.ts          # Encrypted gacha system (.forge/gacha.dat)
-│       ├── crypto.ts         # AES-256-CBC encryption/decryption
-│       ├── fs.ts             # Directory tree reader (workspace context)
-│       ├── fileQueue.ts      # Thread-safe file write queue
-│       └── prompt.ts         # Autocomplete text input utility
+│       ├── consistencyChecker.ts     # Cross-file reference validation
+│       ├── crypto.ts                 # AES-256 PBKDF encryption core
+│       ├── dependencyIntelligence.ts # Real-time NPM package health validator
+│       ├── deploymentGen.ts          # Docker, Compose & CI Actions scaffolding
+│       ├── fileQueue.ts              # File-lock mutex queue
+│       ├── fs.ts                     # File system traversal helpers
+│       ├── gacha.ts                  # Anime character lootbox system
+│       ├── gitIntegration.ts         # Auto-committer & Snapshot rollback
+│       ├── incrementalCache.ts       # SHA256 caching for skip-over speed
+│       ├── memory.ts                 # Encrypted conversational + build memory
+│       ├── prompt.ts                 # Interactive slash-command autocomplete
+│       ├── registry.ts               # Encrypted components tracker
+│       ├── secretManager.ts          # Encrypted Vault for env vars
+│       ├── semanticAnalyzer.ts       # Pre-build logic indexing
+│       ├── ui.ts                     # Split-pane & animated mascot render
+│       └── vectorMemory.ts           # Local Embedding semantic database
 ├── .forge/                   # Encrypted data directory (auto-created)
 │   ├── memory.dat            # AES-256 encrypted session memory
-│   └── gacha.dat             # AES-256 encrypted gacha state
+│   ├── gacha.dat             # AES-256 encrypted gacha state
+│   └── skills/
+│       └── manifest.json     # Skill registry definitions
 ├── workspace/                # All generated projects land here
 ├── .env                      # API keys (OPENROUTER_API_KEY, ADMIN_PASSWORD)
 ├── .gitignore
