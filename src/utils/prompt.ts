@@ -61,10 +61,13 @@ export const autocompleteText = (opts: AutocompleteTextOptions): Promise<string 
       return SLASH_COMMANDS.filter(c => c.cmd.toLowerCase().startsWith(query));
     }
 
+    const MAX_VISIBLE = 6;
+    let windowStart = 0;
+
     function clearSuggestionLines() {
-      const visibleCount = Math.min(6, suggestions.length);
-      const extraLine = suggestions.length > 6 ? 1 : 0;
-      const totalLines = visibleCount + extraLine;
+      const visibleCount = Math.min(MAX_VISIBLE, suggestions.length);
+      const hasMore = suggestions.length > MAX_VISIBLE;
+      const totalLines = visibleCount + (hasMore ? 1 : 0);
       if (totalLines > 0) {
         for (let i = 0; i < totalLines; i++) {
           process.stdout.write('\x1b[B\x1b[2K');
@@ -89,19 +92,35 @@ export const autocompleteText = (opts: AutocompleteTextOptions): Promise<string 
       suggestions = newSuggestions;
       showingSuggestions = newSuggestions.length > 0;
 
-      // Show max 6 suggestions at a time
-      const visibleSuggestions = suggestions.slice(0, 6);
-
       if (showingSuggestions) {
-        // Clamp selected index
-        if (selectedIdx >= visibleSuggestions.length) selectedIdx = visibleSuggestions.length - 1;
+        // Clamp selectedIdx to valid range
+        if (selectedIdx >= suggestions.length) selectedIdx = suggestions.length - 1;
         if (selectedIdx < 0) selectedIdx = 0;
+
+        // Slide the window so selectedIdx is always visible
+        if (selectedIdx >= windowStart + MAX_VISIBLE) {
+          windowStart = selectedIdx - MAX_VISIBLE + 1;
+        }
+        if (selectedIdx < windowStart) {
+          windowStart = selectedIdx;
+        }
+        // Clamp window
+        if (windowStart < 0) windowStart = 0;
+        if (windowStart > suggestions.length - MAX_VISIBLE) {
+          windowStart = Math.max(0, suggestions.length - MAX_VISIBLE);
+        }
+
+        const windowEnd = Math.min(windowStart + MAX_VISIBLE, suggestions.length);
 
         // Save cursor position
         process.stdout.write('\x1b[s');
 
-        for (let i = 0; i < visibleSuggestions.length; i++) {
-          const s = visibleSuggestions[i];
+        // Show "↑ N more" if scrolled down
+        const hasAbove = windowStart > 0;
+        const hasBelow = windowEnd < suggestions.length;
+
+        for (let i = windowStart; i < windowEnd; i++) {
+          const s = suggestions[i];
           const isActive = i === selectedIdx;
           const pointer = isActive ? chalk.cyan('❯') : chalk.dim(' ');
           const cmdText = isActive ? chalk.cyan.bold(s.cmd) : chalk.dim.gray(s.cmd);
@@ -109,9 +128,12 @@ export const autocompleteText = (opts: AutocompleteTextOptions): Promise<string 
           process.stdout.write(`\n\x1b[2K  ${pointer} ${cmdText.padEnd(22)} ${descText}`);
         }
 
-        // Show "N more..." hint if truncated
-        if (suggestions.length > 6) {
-          process.stdout.write(`\n\x1b[2K  ${chalk.dim(`  ... ${suggestions.length - 6} more`)}`);
+        // Show scroll hint
+        if (hasAbove || hasBelow) {
+          const hints: string[] = [];
+          if (hasAbove) hints.push(`↑ ${windowStart} above`);
+          if (hasBelow) hints.push(`↓ ${suggestions.length - windowEnd} below`);
+          process.stdout.write(`\n\x1b[2K  ${chalk.dim(`  ${hints.join('  |  ')}`)}`);
         }
 
         // Restore cursor position back to input line
